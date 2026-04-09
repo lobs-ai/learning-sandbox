@@ -25,11 +25,9 @@ The rule: **if you can't watch it evolve in under 5 minutes, it's too complex.**
 
 - Prey are stationary but have a **food detection radius**. They "gather" food within range.
 - **Food** spawns randomly across the arena. Prey absorb food within their radius.
-- **Neural net brain:** Each prey has a small MLP — inputs are nearby food positions + nearby predator positions, outputs are stay/expand/shrink detection radius.
-- Prey learn via policy gradient: reward = food gathered, penalty = predator proximity.
-- **Reproduction:** Offspring inherit parent's trained weights + Gaussian mutation. Then continues learning from own experience.
-- **Death:** Prey starve if food is scarce (food respawns slowly, competition matters).
-- **Trait under selection:** detection radius + learning rate — evolves via selection, but the brain learns.
+- **Evolutionary:** No neural net. Trait = detection radius. Reproduce with mutation. The "learning" is natural selection across generations.
+- **Reproduction:** Offspring inherit detection radius ± Gaussian mutation.
+- **Death:** Prey starve if food is scarce.
 
 ### Predator Behavior
 
@@ -38,8 +36,7 @@ The rule: **if you can't watch it evolve in under 5 minutes, it's too complex.**
 - **Starving:** predators die if they haven't caught prey in N steps.
 - **Neural net brain:** MLP — inputs are nearby prey positions + own velocity + recent reward history, outputs are movement direction + speed.
 - Predators learn via DQN or policy gradient: reward = catching prey, penalty = time spent chasing without result.
-- **Reproduction:** Offspring inherit parent's trained weights + Gaussian mutation. Then continues learning from own experience.
-- **Trait under selection:** speed + perception range + learning rate — evolves via selection, but the brain actually learns from experience.
+- **Reproduction:** Offspring inherit trained weights + Gaussian mutation. Then continues learning from own experience.
 
 ### Co-Evolution Dynamics
 
