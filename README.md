@@ -1,18 +1,25 @@
 # Learning Sandbox
 
-A digital ecosystem where prey and predators both have neural net brains, both learn in real time, and both pass down trained weights to their offspring with mutation.
-
-Watch evolution and learning happen simultaneously.
+A digital ecosystem where predators hunt using **DQN neural nets** trained by TD error, and prey learn with tabular Q-tables. Both populations inherit learned weights to their offspring with mutation. Watch intelligence emerge.
 
 ---
 
 ## Quick Start
 
 ```bash
-cd learning-sandbox
 pip install -r requirements.txt
 python ecosystem.py
 ```
+
+---
+
+## What Each Agent Learns
+
+**Predators (red)**: DQN neural net — 7 inputs (3 nearest prey positions + own energy), 64-unit hidden layer, 3 outputs (turn left/right/straight). Trained by TD error with experience replay and a target network. Each catch is a reward signal; each miss is a penalty. Over generations, they learn to anticipate prey movement.
+
+**Prey (green)**: Tabular Q-learning — discretized state (food direction, predator direction, energy level) → action values. They learn to seek food and flee predators.
+
+**Both**: Reproduction passes down learned weights with small Gaussian mutation. Selection pressure means better hunters and smarter prey reproduce more.
 
 ---
 
@@ -27,31 +34,9 @@ python ecosystem.py
 
 ---
 
-## What You're Watching
-
-**Prey** (green dots): Stand still to gather food. Have MLP brains that learn via policy gradient — expand or shrink detection radius based on reward. Reproduce with inherited weights + mutation.
-
-**Predators** (red dots): Hunt prey. Have MLP brains that learn targeting strategy. Reproduce with inherited weights + mutation.
-
-**Population graph**: Green = prey count, Red = predator count. Classic Lotka-Volterra dynamics — boom and bust cycles.
-
----
-
 ## Requirements
 
 - Python 3.10+
-- pygame
+- pygame >= 2.0.0
+- torch >= 2.0.0
 - numpy
-
----
-
-## Project Structure
-
-```
-ecosystem.py      — Main simulation
-test_ecosystem.py — Unit tests
-requirements.txt  — Dependencies
-.gitignore       — Git ignores
-DESIGN.md        — Full design doc
-README.md        — This file
-```
