@@ -11,7 +11,6 @@ import numpy as np
 
 # Initialize pygame
 pygame.init()
-pygame.font.init()
 
 # Screen
 WIDTH, HEIGHT = 1200, 700

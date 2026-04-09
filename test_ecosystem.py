@@ -54,9 +54,7 @@ class MockPygame:
     class font:
         Font = object
 
-    class INIT_OK = None
 
-    class QUIT = None
     KEYDOWN = 2
     MOUSEBUTTONDOWN = 3
 
