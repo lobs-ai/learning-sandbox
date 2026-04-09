@@ -21,7 +21,22 @@ GRAPH_W, GRAPH_H = 250, 200
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Learning Sandbox")
 clock = pygame.time.Clock()
-font = pygame.font.Font(None, 14)
+
+# Font — create after display is ready to avoid Python 3.14 + pygame circular import bug
+try:
+    font_renderer = pygame.font.Font(None, 14)
+except Exception:
+    font_renderer = None
+
+
+def draw_text(surface, text, pos, color=WHITE):
+    if font_renderer:
+        surf = font_renderer.render(text, True, color)
+        surface.blit(surf, pos)
+    else:
+        # Fallback: draw text as colored rectangles at approximate size
+        w, h = len(text) * 7, 12
+        pygame.draw.rect(surface, color, (*pos, w, h), border_radius=1)
 
 # Colors
 BG = (10, 10, 20)
@@ -456,19 +471,12 @@ while running:
     pygame.draw.rect(screen, PANEL_BG, panel_rect, border_radius=6)
 
     # Stats
-    gen_text = font.render(f"Gen: {gen}", True, WHITE)
-    prey_text = font.render(f"Prey: {len(prey_list)}", True, PREY_COLOR)
-    pred_text = font.render(f"Predators: {len(pred_list)}", True, PRED_COLOR)
-    speed_text = font.render(f"Speed: {speed}x [SPACE]", True, WHITE)
-    reset_text = font.render("[R] Reset", True, WHITE)
-    click_text = font.render("[Click] Add food", True, WHITE)
-
-    screen.blit(gen_text, (ARENA_W + 20, 20))
-    screen.blit(prey_text, (ARENA_W + 20, 40))
-    screen.blit(pred_text, (ARENA_W + 20, 60))
-    screen.blit(speed_text, (ARENA_W + 20, HEIGHT - 70))
-    screen.blit(reset_text, (ARENA_W + 20, HEIGHT - 50))
-    screen.blit(click_text, (ARENA_W + 20, HEIGHT - 30))
+    draw_text(screen, f"Gen: {gen}", (ARENA_W + 20, 20), WHITE)
+    draw_text(screen, f"Prey: {len(prey_list)}", (ARENA_W + 20, 40), PREY_COLOR)
+    draw_text(screen, f"Predators: {len(pred_list)}", (ARENA_W + 20, 60), PRED_COLOR)
+    draw_text(screen, f"Speed: {speed}x [SPACE]", (ARENA_W + 20, HEIGHT - 70), WHITE)
+    draw_text(screen, "[R] Reset", (ARENA_W + 20, HEIGHT - 50), WHITE)
+    draw_text(screen, "[Click] Add food", (ARENA_W + 20, HEIGHT - 30), WHITE)
 
     # Graph
     if show_graph:
