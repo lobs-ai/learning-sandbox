@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Learning Sandbox — Ecosystem Simulation
-Prey and predators both have neural nets, both learn, both inherit weights on reproduction.
+Prey and predators both have neural nets, both learn via policy gradient, both inherit weights on reproduction.
 """
 
 import pygame
@@ -45,17 +45,16 @@ def draw_text(surface, text, pos, color=None):
         surf = font_renderer.render(text, True, color)
         surface.blit(surf, pos)
     else:
-        # Fallback: draw text as colored rectangles at approximate size
         w, h = len(text) * 7, 12
         pygame.draw.rect(surface, color, (*pos, w, h), border_radius=1)
 
-# Simulation params
+
+# --- Constants ---
 FPS = 60
 ARENA_RECT = pygame.Rect(10, 50, ARENA_W, ARENA_H)
 INITIAL_PREY = 80
 INITIAL_PRED = 15
 FOOD_COUNT = 60
-FOOD_RESPAWN_RATE = 0.02
 PREY_REPRODUCE_THRESHOLD = 1.0
 PRED_REPRODUCE_THRESHOLD = 1.5
 PREY_DEATH_THRESHOLD = 0.0
@@ -66,34 +65,76 @@ REWARD_CATCH = 2.0
 PENALTY_DANGER = 0.1
 PENALTY_STARVE = 0.5
 SPEED_MULTIPLIER = 1
+CELL_SIZE = 50
 
-# --- Neural Net ---
+
+# --- Neural Net with Backprop ---
 class MLP:
+    """MLP with forward pass and backward gradient computation."""
+
     def __init__(self, input_dim, hidden_dim, output_dim):
-        self.fc1 = np.random.randn(input_dim, hidden_dim) * 0.3
-        self.fc2 = np.random.randn(hidden_dim, output_dim) * 0.3
-        self.input_dim = input_dim
-        self.output_dim = output_dim
+        scale = np.sqrt(2.0 / input_dim)
+        self.fc1_w = np.random.randn(input_dim, hidden_dim) * scale
+        self.fc1_b = np.zeros(hidden_dim)
+        scale_out = np.sqrt(2.0 / hidden_dim)
+        self.fc2_w = np.random.randn(hidden_dim, output_dim) * scale_out
+        self.fc2_b = np.zeros(output_dim)
 
     def forward(self, x):
-        x = np.tanh(self.fc1.T @ x)
-        x = self.fc2.T @ x
-        return x
+        """Returns (output, cache) where cache is needed for backward."""
+        self.x = x  # store input
+        self.z1 = self.fc1_w.T @ x + self.fc1_b
+        self.h1 = np.tanh(self.z1)
+        self.z2 = self.fc2_w.T @ self.h1 + self.fc2_b
+        # Softmax for probability distribution
+        e_z = np.exp(self.z2 - np.max(self.z2))
+        self.probs = e_z / e_z.sum()
+        return self.probs
+
+    def backward(self, reward, action):
+        """REINFORCE policy gradient: grad = (log_prob_of_action) * reward.
+        Computes gradients w.r.t. weights and applies SGD step."""
+        # Policy gradient: dlog_pi/a / dtheta * reward
+        # grad_z2 = (probs - one_hot) * reward  (cross-entropy gradient)
+        grad_z2 = self.probs.copy()
+        grad_z2[action] -= 1.0  # one-hot
+        grad_z2 *= reward
+
+        # Gradient of output w.r.t. hidden weights
+        # dz2/dW2 = outer(h1, grad_z2)
+        grad_w2 = np.outer(self.h1, grad_z2)
+        grad_b2 = grad_z2
+
+        # Backprop through tanh: dh1/dz1 = (1 - tanh^2)
+        grad_h1 = self.fc2_w @ grad_z2
+        grad_z1 = grad_h1 * (1 - self.h1 ** 2)
+
+        # Gradient of first layer
+        grad_w1 = np.outer(self.x, grad_z1)
+        grad_b1 = grad_z1
+
+        lr = 0.005
+        self.fc1_w -= lr * grad_w1
+        self.fc1_b -= lr * grad_b1
+        self.fc2_w -= lr * grad_w2
+        self.fc2_b -= lr * grad_b2
 
     def copy(self):
-        other = MLP(self.input_dim, self.fc1.shape[0], self.output_dim)
-        other.fc1 = self.fc1.copy()
-        other.fc2 = self.fc2.copy()
+        other = MLP(0, 0, 0)
+        other.fc1_w = self.fc1_w.copy()
+        other.fc1_b = self.fc1_b.copy()
+        other.fc2_w = self.fc2_w.copy()
+        other.fc2_b = self.fc2_b.copy()
         return other
 
     def mutate(self, rate=WEIGHT_MUTATION):
-        self.fc1 += np.random.randn(*self.fc1.shape) * rate
-        self.fc2 += np.random.randn(*self.fc2.shape) * rate
+        self.fc1_w += np.random.randn(*self.fc1_w.shape) * rate
+        self.fc2_w += np.random.randn(*self.fc2_w.shape) * rate
 
 
 # --- Spatial Hash ---
 class SpatialHash:
-    def __init__(self, cell_size=40):
+    def __init__(self, cell_size=CELL_SIZE):
         self.cell_size = cell_size
         self.cells = {}
 
@@ -109,81 +150,86 @@ class SpatialHash:
             self.cells[k] = []
         self.cells[k].append(obj)
 
-    def query(self, x, y, radius):
+    def query_radius(self, x, y, radius):
+        """Return (obj, dist) for all objects within radius. O(1) per cell."""
         cx, cy = self.hash_pos(x, y)
         results = []
-        for dx in range(-2, 3):
-            for dy in range(-2, 3):
+        search_cells = int(radius // self.cell_size) + 1
+        for dx in range(-search_cells, search_cells + 1):
+            for dy in range(-search_cells, search_cells + 1):
                 k = (cx + dx, cy + dy)
                 if k in self.cells:
                     for obj in self.cells[k]:
-                        ox, oy = obj.x, obj.y
-                        dist = math.hypot(x - ox, y - oy)
-                        if dist <= radius:
-                            results.append((obj, dist))
+                        d = math.hypot(x - obj.x, y - obj.y)
+                        if d <= radius:
+                            results.append((obj, d))
         return results
+
+    def nearest(self, x, y, candidates, max_count=3):
+        """Return up to max_count nearest candidates, sorted by distance."""
+        if not candidates:
+            return []
+        dists = [(math.hypot(c.x - x, c.y - y), c) for c in candidates]
+        dists.sort(key=lambda t: t[0])
+        return [c for _, c in dists[:max_count]]
 
 
 # --- Prey ---
 class Prey:
     def __init__(self, x, y, brain=None):
         self.x, self.y = x, y
-        self.vx, self.vy = 0, 0
+        self.vx, self.vy = 0.0, 0.0
         self.energy = 0.5
         self.detection_radius = random.uniform(30, 60)
         self.speed = random.uniform(0.8, 1.5)
         self.age = 0
-        self.last_danger = 0
-        self.brain = brain if brain else MLP(input_dim=5, hidden_dim=8, output_dim=3)
-        self.accumulated_gradient_fc1 = np.zeros_like(self.brain.fc1)
-        self.accumulated_gradient_fc2 = np.zeros_like(self.brain.fc2)
-        self.activation_history = []
+        # Brain: 5 inputs, 8 hidden, 3 outputs (seek_food, flee, wander)
+        self.brain = brain if brain else MLP(5, 8, 3)
 
-    def perceive(self, food_list, predators):
-        # Normalized inputs
-        nearest_food = min(food_list, key=lambda f: math.hypot(f.x - self.x, f.y - self.y), default=None)
-        nearest_pred = min(predators, key=lambda p: math.hypot(p.x - self.x, p.y - self.y), default=None)
+    def perceive(self, food_in_range, pred_in_range, nearest_pred_dist):
+        """Perception from nearby food and predators (already filtered by spatial hash)."""
+        # Food: distance and angle to nearest food
+        if food_in_range:
+            f = min(food_in_range, key=lambda item: item[1])
+            food_dist = f[1] / self.detection_radius
+            food_angle = math.atan2(f[0].y - self.y, f[0].x - self.x) / math.pi
+        else:
+            food_dist = 1.0
+            food_angle = 0.0
 
-        food_dist = nearest_food.dist / self.detection_radius if nearest_food else 1.0
-        food_angle = math.atan2(nearest_food.y - self.y, nearest_food.x - self.x) / math.pi if nearest_food else 0.0
-        pred_dist = nearest_pred.detection_radius / self.detection_radius if nearest_pred else 1.0
-        pred_angle = math.atan2(nearest_pred.y - self.y, nearest_pred.x - self.x) / math.pi if nearest_pred else 0.0
-        energy = self.energy
+        # Predator: distance and angle to nearest predator
+        if pred_in_range:
+            p = min(pred_in_range, key=lambda item: item[1])
+            pred_dist = p[1] / (self.detection_radius * 2)
+            pred_angle = math.atan2(p[0].y - self.y, p[0].x - self.x) / math.pi
+        else:
+            pred_dist = 1.0
+            pred_angle = 0.0
 
-        return np.array([food_dist, food_angle, pred_dist, pred_angle, energy])
+        # Energy level
+        energy_norm = self.energy
+
+        return np.array([food_dist, food_angle, pred_dist, pred_angle, energy_norm])
 
     def act(self, perception):
-        logits = self.brain.forward(perception)
-        action = np.argmax(logits)
-        # Actions: 0=seek food, 1=flee predator, 2=wander
-        target_x, target_y = self.x, self.y
+        """Forward through MLP, pick action, move."""
+        probs = self.brain.forward(perception)
+        action = np.random.choice(len(probs), p=probs)
+        self.last_action = action
+        self.last_probs = probs
 
+        # Compute target direction based on action
+        target_angle = random.uniform(0, 2 * math.pi)
         if action == 0 and perception[0] < 1.0:
-            # Seek nearest food
-            angle = perception[1] * math.pi
-            target_x = self.x + math.cos(angle) * 50
-            target_y = self.y + math.sin(angle) * 50
+            # Seek food
+            target_angle = perception[1] * math.pi
         elif action == 1 and perception[2] < 1.0:
-            # Flee from predator
-            angle = perception[3] * math.pi
-            target_x = self.x - math.cos(angle) * 50
-            target_y = self.y - math.sin(angle) * 50
-        else:
-            # Wander
-            target_x = self.x + random.uniform(-20, 20)
-            target_y = self.y + random.uniform(-20, 20)
+            # Flee predator
+            target_angle = perception[3] * math.pi + math.pi
+        # else wander (random direction)
 
-        # Move toward target
-        dx = target_x - self.x
-        dy = target_y - self.y
-        dist = math.hypot(dx, dy)
-        if dist > 0.1:
-            self.vx = (dx / dist) * self.speed
-            self.vy = (dy / dist) * self.speed
-        else:
-            self.vx *= 0.8
-            self.vy *= 0.8
-
+        self.vx = math.cos(target_angle) * self.speed
+        self.vy = math.sin(target_angle) * self.speed
         self.x += self.vx
         self.y += self.vy
 
@@ -202,15 +248,15 @@ class Prey:
             self.vy *= -1
 
     def learn(self, reward):
-        # Simple REINFORCE-like weight update
-        delta = reward * 0.01
-        self.brain.fc1 += np.random.randn(*self.brain.fc1.shape) * delta
-        self.brain.fc2 += np.random.randn(*self.brain.fc2.shape) * delta
+        """Policy gradient update using REINFORCE."""
+        if hasattr(self, 'last_action') and hasattr(self, 'last_probs'):
+            self.brain.backward(reward, self.last_action)
 
     def reproduce(self):
         self.energy *= 0.5
-        child = Prey(self.x + random.uniform(-10, 10), self.y + random.uniform(-10, 10), self.brain.copy())
-        child.detection_radius = self.detection_radius + random.uniform(-5, 5)
+        child = Prey(self.x + random.uniform(-10, 10), self.y + random.uniform(-10, 10),
+                     self.brain.copy())
+        child.detection_radius = max(15, min(80, self.detection_radius + random.uniform(-5, 5)))
         child.speed = max(0.5, min(2.5, self.speed + random.uniform(-0.1, 0.1)))
         child.energy = 0.5
         return child
@@ -220,16 +266,16 @@ class Prey:
 class Predator:
     def __init__(self, x, y, brain=None):
         self.x, self.y = x, y
-        self.vx, self.vy = 0, 0
+        self.vx, self.vy = 0.0, 0.0
         self.energy = 0.5
         self.starve_counter = 0
         self.detection_radius = random.uniform(60, 100)
         self.speed = random.uniform(1.5, 2.5)
-        self.brain = brain if brain else MLP(input_dim=9, hidden_dim=10, output_dim=3)
-        self.last_reward = 0
+        # Brain: 7 inputs (3 prey * 2 coords), hidden=10, output=3 (turn_left, turn_right, straight)
+        self.brain = brain if brain else MLP(9, 10, 3)
 
-    def perceive(self, prey_list):
-        nearest_prey = sorted(prey_list, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))[:3]
+    def perceive(self, nearest_prey):
+        """Prey perception: 3 nearest prey (x, y offsets), plus own velocity and energy."""
         inputs = []
         for i in range(3):
             if i < len(nearest_prey):
@@ -245,20 +291,25 @@ class Predator:
         return np.array(inputs)
 
     def act(self, perception):
-        logits = self.brain.forward(perception)
-        action = np.argmax(logits)
-        # Actions: 0=left, 1=right, 2=forward
-        angle = random.uniform(0, 2 * math.pi)
+        """Forward through MLP, pick action, move."""
+        probs = self.brain.forward(perception)
+        action = np.random.choice(len(probs), p=probs)
+        self.last_action = action
+        self.last_probs = probs
+
+        current_angle = math.atan2(self.vy, self.vx) if (self.vx or self.vy) else 0.0
         if action == 0:
-            angle = math.atan2(self.vy, self.vx) - 0.4
+            angle = current_angle - 0.4
         elif action == 1:
-            angle = math.atan2(self.vy, self.vx) + 0.4
+            angle = current_angle + 0.4
         else:
-            angle = math.atan2(self.vy, self.vx)
+            angle = current_angle
+
         self.vx = math.cos(angle) * self.speed
         self.vy = math.sin(angle) * self.speed
-        self.x += self.vx * SPEED_MULTIPLIER
-        self.y += self.vy * SPEED_MULTIPLIER
+        self.x += self.vx
+        self.y += self.vy
+
         # Bounce off walls
         if self.x < 10:
             self.x = 10
@@ -274,10 +325,8 @@ class Predator:
             self.vy *= -1
 
     def learn(self, reward):
-        self.last_reward = reward
-        delta = reward * 0.01
-        self.brain.fc1 += np.random.randn(*self.brain.fc1.shape) * delta
-        self.brain.fc2 += np.random.randn(*self.brain.fc2.shape) * delta
+        if hasattr(self, 'last_action') and hasattr(self, 'last_probs'):
+            self.brain.backward(reward, self.last_action)
 
     def reproduce(self):
         self.energy *= 0.5
@@ -291,7 +340,7 @@ class Predator:
 class Food:
     def __init__(self, x, y):
         self.x, self.y = x, y
-        self.dist = random.uniform(3, 6)
+        self.radius = random.uniform(3, 6)
 
     def respawn(self):
         self.x = random.uniform(20, ARENA_W - 20)
@@ -323,9 +372,12 @@ gen = 0
 
 def init():
     global prey_list, pred_list, food_list, stats, gen
-    prey_list = [Prey(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50)) for _ in range(INITIAL_PREY)]
-    pred_list = [Predator(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50)) for _ in range(INITIAL_PRED)]
-    food_list = [Food(random.uniform(20, ARENA_W - 20), random.uniform(60, ARENA_H - 20)) for _ in range(FOOD_COUNT)]
+    prey_list = [Prey(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50))
+                 for _ in range(INITIAL_PREY)]
+    pred_list = [Predator(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50))
+                 for _ in range(INITIAL_PRED)]
+    food_list = [Food(random.uniform(20, ARENA_W - 20), random.uniform(60, ARENA_H - 20))
+                 for _ in range(FOOD_COUNT)]
     stats = Stats()
     gen = 0
 
@@ -353,46 +405,50 @@ while running:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mx, my = pygame.mouse.get_pos()
             if ARENA_RECT.collidepoint(mx, my):
-                # Click to add food
                 food_list.append(Food(mx, my))
 
     # --- Simulation step ---
     for _ in range(speed):
         gen += 1
-        spatial.clear()
 
-        # Spatial index
+        # Rebuild spatial index
+        spatial.clear()
         for p in prey_list:
             spatial.insert(p, p.x, p.y)
         for f in food_list:
             spatial.insert(f, f.x, f.y)
 
-        # Prey step
+        # --- Prey step ---
         new_prey = []
         for p in prey_list:
-            perception = p.perceive(food_list, pred_list)
+            # Use spatial hash for O(1) neighbor lookup instead of O(n) scan
+            food_in_range = spatial.query_radius(p.x, p.y, p.detection_radius)
+            pred_in_range = spatial.query_radius(p.x, p.y, p.detection_radius * 2)
+            nearest_pred = min(pred_in_range, key=lambda item: item[1], default=(None, float('inf')))
+            nearest_pred_dist = nearest_pred[1] if nearest_pred[0] else float('inf')
+
+            perception = p.perceive(food_in_range, pred_in_range, nearest_pred_dist)
             p.act(perception)
 
             # Gather food
             eaten = False
-            for food in food_list:
-                if math.hypot(p.x - food.x, p.y - food.y) < p.detection_radius:
+            for food, dist in food_in_range:
+                if dist < p.detection_radius:
                     p.energy += REWARD_GATHER
                     p.learn(REWARD_GATHER)
                     food.respawn()
                     eaten = True
                     break
 
-            # Check danger - flee if predator nearby
-            nearest_pred = min(pred_list, key=lambda pr: math.hypot(p.x - pr.x, p.y - pr.y), default=None)
-            if nearest_pred and math.hypot(p.x - nearest_pred.x, p.y - nearest_pred.y) < p.detection_radius * 2:
+            # Danger penalty
+            if nearest_pred_dist < p.detection_radius * 2:
                 p.learn(-PENALTY_DANGER)
 
             # Reproduce
             if p.energy > PREY_REPRODUCE_THRESHOLD:
                 new_prey.append(p.reproduce())
 
-            # Death
+            # Energy drain / death
             if p.energy < PREY_DEATH_THRESHOLD:
                 p.energy -= 0.01
             else:
@@ -401,10 +457,15 @@ while running:
         prey_list.extend(new_prey)
         prey_list = [p for p in prey_list if p.energy > 0]
 
-        # Predator step
+        # --- Predator step ---
         new_pred = []
         for pr in pred_list:
-            perception = pr.perceive(prey_list)
+            # Find 3 nearest prey using spatial hash
+            prey_in_range = spatial.query_radius(pr.x, pr.y, pr.detection_radius)
+            prey_candidates = [item[0] for item in prey_in_range]
+            nearest_prey = spatial.nearest(pr.x, pr.y, prey_candidates, max_count=3)
+
+            perception = pr.perceive(nearest_prey)
             pr.act(perception)
             pr.starve_counter += 1
             pr.energy -= PENALTY_STARVE * 0.01
@@ -433,29 +494,26 @@ while running:
         pred_list.extend(new_pred)
         pred_list = [p for p in pred_list if p.energy > 0]
 
-        # Food respawn
+        # Food respawn (stochastic)
         for f in food_list:
-            if random.random() < FOOD_RESPAWN_RATE * 0.1:
+            if random.random() < 0.02:
                 f.respawn()
 
         stats.record(len(prey_list), len(pred_list))
 
     # --- Render ---
     screen.fill(BG)
-
-    # Arena background
     pygame.draw.rect(screen, (15, 15, 30), ARENA_RECT)
     pygame.draw.rect(screen, GRID_COLOR, ARENA_RECT, 1)
 
     # Food
     for f in food_list:
-        pygame.draw.circle(screen, FOOD_COLOR, (int(f.x), int(f.y)), int(f.dist))
+        pygame.draw.circle(screen, FOOD_COLOR, (int(f.x), int(f.y)), int(f.radius))
 
     # Prey
     for p in prey_list:
         r = max(3, int(p.detection_radius * 0.15))
         pygame.draw.circle(screen, PREY_COLOR, (int(p.x), int(p.y)), r)
-        # Direction indicator
         if abs(p.vx) > 0.1 or abs(p.vy) > 0.1:
             pygame.draw.line(screen, (100, 255, 150), (int(p.x), int(p.y)),
                              (int(p.x + p.vx * 6), int(p.y + p.vy * 6)), 1)
@@ -463,7 +521,6 @@ while running:
     # Predators
     for pr in pred_list:
         pygame.draw.circle(screen, PRED_COLOR, (int(pr.x), int(pr.y)), 6)
-        # Direction indicator
         if abs(pr.vx) > 0.1 or abs(pr.vy) > 0.1:
             pygame.draw.line(screen, (255, 150, 150), (int(pr.x), int(pr.y)),
                              (int(pr.x + pr.vx * 8), int(pr.y + pr.vy * 8)), 2)
@@ -472,7 +529,6 @@ while running:
     panel_rect = pygame.Rect(ARENA_W + 10, 10, WIDTH - ARENA_W - 20, HEIGHT - 20)
     pygame.draw.rect(screen, PANEL_BG, panel_rect, border_radius=6)
 
-    # Stats
     draw_text(screen, f"Gen: {gen}", (ARENA_W + 20, 20), WHITE)
     draw_text(screen, f"Prey: {len(prey_list)}", (ARENA_W + 20, 40), PREY_COLOR)
     draw_text(screen, f"Predators: {len(pred_list)}", (ARENA_W + 20, 60), PRED_COLOR)
@@ -489,20 +545,15 @@ while running:
         if len(stats.prey_history) > 1:
             max_val = max(max(stats.prey_history), max(stats.pred_history), 1)
             # Prey line
-            pts = []
-            for i, cnt in enumerate(stats.prey_history):
-                x = GRAPH_X + int(i / stats.max_history * GRAPH_W)
-                y = GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20))
-                pts.append((x, y))
+            pts = [(GRAPH_X + int(i / stats.max_history * GRAPH_W),
+                    GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20)))
+                   for i, cnt in enumerate(stats.prey_history)]
             if pts:
                 pygame.draw.lines(screen, PREY_COLOR, False, pts, 2)
-
             # Predator line
-            pts = []
-            for i, cnt in enumerate(stats.pred_history):
-                x = GRAPH_X + int(i / stats.max_history * GRAPH_W)
-                y = GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20))
-                pts.append((x, y))
+            pts = [(GRAPH_X + int(i / stats.max_history * GRAPH_W),
+                    GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20)))
+                   for i, cnt in enumerate(stats.pred_history)]
             if pts:
                 pygame.draw.lines(screen, PRED_COLOR, False, pts, 2)
 
