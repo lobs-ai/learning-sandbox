@@ -31,11 +31,8 @@ GRID_COLOR = (30, 30, 50)
 WHITE = (220, 220, 220)
 PANEL_BG = (20, 20, 35)
 
-# Font — create after display is ready to avoid Python 3.14 + pygame circular import bug
-try:
-    font_renderer = pygame.font.Font(None, 14)
-except Exception:
-    font_renderer = None
+# Font — lazy init to avoid Python 3.14 + pygame circular import bug
+font_renderer = None
 
 
 def draw_text(surface, text, pos, color=None):
