@@ -22,23 +22,7 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Learning Sandbox")
 clock = pygame.time.Clock()
 
-# Font — create after display is ready to avoid Python 3.14 + pygame circular import bug
-try:
-    font_renderer = pygame.font.Font(None, 14)
-except Exception:
-    font_renderer = None
-
-
-def draw_text(surface, text, pos, color=WHITE):
-    if font_renderer:
-        surf = font_renderer.render(text, True, color)
-        surface.blit(surf, pos)
-    else:
-        # Fallback: draw text as colored rectangles at approximate size
-        w, h = len(text) * 7, 12
-        pygame.draw.rect(surface, color, (*pos, w, h), border_radius=1)
-
-# Colors
+# Colors — must be defined before draw_text
 BG = (10, 10, 20)
 PREY_COLOR = (50, 220, 100)
 PRED_COLOR = (220, 60, 60)
@@ -46,6 +30,24 @@ FOOD_COLOR = (255, 230, 80)
 GRID_COLOR = (30, 30, 50)
 WHITE = (220, 220, 220)
 PANEL_BG = (20, 20, 35)
+
+# Font — create after display is ready to avoid Python 3.14 + pygame circular import bug
+try:
+    font_renderer = pygame.font.Font(None, 14)
+except Exception:
+    font_renderer = None
+
+
+def draw_text(surface, text, pos, color=None):
+    if color is None:
+        color = WHITE
+    if font_renderer:
+        surf = font_renderer.render(text, True, color)
+        surface.blit(surf, pos)
+    else:
+        # Fallback: draw text as colored rectangles at approximate size
+        w, h = len(text) * 7, 12
+        pygame.draw.rect(surface, color, (*pos, w, h), border_radius=1)
 
 # Simulation params
 FPS = 60
