@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 Learning Sandbox — Ecosystem Simulation
-Prey and predators both have neural net brains with DQN learning (actor-critic),
-both inherit weights on reproduction.
+Predators: DQN neural net trained by TD error. Prey: tabular Q-learning.
+Both inherit learned weights on reproduction.
 """
 
 import pygame
 import random
 import math
 import numpy as np
+import copy
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 pygame.init()
 
@@ -47,21 +51,70 @@ def draw_text(surface, text, pos, color=None):
 # --- Constants ---
 FPS = 60
 ARENA_RECT = pygame.Rect(10, 50, ARENA_W, ARENA_H)
-INITIAL_PREY = 80
-INITIAL_PRED = 8
-FOOD_COUNT = 60
+INITIAL_PREY = 50
+INITIAL_PRED = 4
+FOOD_COUNT = 50
 PREY_REPRODUCE_THRESHOLD = 1.5
-PRED_REPRODUCE_THRESHOLD = 4.0
-PREY_DEATH_THRESHOLD = 0.0
+PRED_REPRODUCE_THRESHOLD = 5.0
 PRED_STARVE_STEPS = 400
 FOOD_RESPAWN_RATE = 0.03
-WEIGHT_MUTATION = 0.05
 REWARD_GATHER = 1.0
-REWARD_CATCH = 4.0
-REWARD_CLOSER = 0.1
-PENALTY_DANGER = 0.3
+REWARD_CATCH = 5.0
+REWARD_CLOSER = 0.05
+PENALTY_DANGER = 0.2
 PENALTY_STARVE = 0.1
 CELL_SIZE = 60
+
+# DQN Hyperparams
+GAMMA = 0.99
+LR = 0.001
+BATCH_SIZE = 32
+REPLAY_SIZE = 2000
+TARGET_UPDATE = 10
+
+
+# --- Device ---
+device = torch.device("cpu")
+
+
+# --- DQN Neural Net ---
+class DQN(nn.Module):
+    def __init__(self, input_dim, hidden_dim=64, output_dim=3):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+# --- Experience Replay ---
+class ReplayBuffer:
+    def __init__(self, capacity=REPLAY_SIZE):
+        self.buf = []
+        self.capacity = capacity
+
+    def push(self, state, action, reward, next_state, done):
+        self.buf.append((state, action, reward, next_state, done))
+        if len(self.buf) > self.capacity:
+            self.buf.pop(0)
+
+    def sample(self, batch_size=BATCH_SIZE):
+        batch = random.sample(self.buf, min(len(self.buf), batch_size))
+        states, actions, rewards, next_states, dones = zip(*batch)
+        return (np.array(states, dtype=np.float32),
+                np.array(actions, dtype=np.int64),
+                np.array(rewards, dtype=np.float32),
+                np.array(next_states, dtype=np.float32),
+                np.array(dones, dtype=np.float32))
+
+    def __len__(self):
+        return len(self.buf)
 
 
 # --- Spatial Hash ---
@@ -83,7 +136,6 @@ class SpatialHash:
         self.cells[k].append(obj)
 
     def query_radius(self, x, y, radius):
-        """Return all (obj, dist) within radius. O(1) per cell."""
         cx, cy = self._hash(x, y)
         r = int(radius // self.cell_size) + 1
         results = []
@@ -106,94 +158,63 @@ class SpatialHash:
         return [c for _, c in dists[:max_n]]
 
 
-# --- Agent Base ---
-class Agent:
-    def __init__(self, x, y, brain=None):
+# --- Prey: Tabular Q-Learning ---
+class Prey:
+    def __init__(self, x, y, q_table=None):
         self.x, self.y = x, y
         self.vx, self.vy = 0.0, 0.0
         self.energy = 1.0
-        self.age = 0
-        self.speed = 1.0
-        self.brain = brain  # must be set by subclass
-        self.last_state = None
-        self.last_action = None
-        self.q_values = None  # for rendering/debug
-
-    def _discretize(self, perception):
-        """Coarse discretization for Q-table. Bin continuous inputs into 5 bins."""
-        bins = np.zeros(len(perception))
-        for i, v in enumerate(perception):
-            bins[i] = int(np.clip(v * 5, 0, 4))
-        return tuple(bins.astype(int))
-
-    def choose_action(self, perception, epsilon):
-        """Epsilon-greedy Q-learning action selection."""
-        state = self._discretize(perception)
-        if state not in self.q_table:
-            self.q_table[state] = np.zeros(len(self.brain))
-        self.q_values = self.q_table[state]
-        if random.random() < epsilon:
-            return random.randrange(len(self.brain))
-        return int(np.argmax(self.q_values))
-
-    def learn(self, state, action, reward, next_state):
-        """Q-learning update: Q(s,a) <- Q(s,a) + alpha * (r + gamma * max Q(s',a') - Q(s,a))"""
-        if state not in self.q_table:
-            self.q_table[state] = np.zeros(len(self.brain))
-        if next_state not in self.q_table:
-            self.q_table[next_state] = np.zeros(len(self.brain))
-        target = reward + 0.9 * np.max(self.q_table[next_state])
-        self.q_table[state][action] += 0.3 * (target - self.q_table[state][action])
-
-    def act_greedy(self, perception):
-        """Pick best action without exploration."""
-        state = self._discretize(perception)
-        if state not in self.q_table:
-            self.q_table[state] = np.zeros(len(self.brain))
-        return int(np.argmax(self.q_table[state]))
-
-
-# --- Prey ---
-class Prey(Agent):
-    def __init__(self, x, y, brain=None):
-        super().__init__(x, y, brain=None)
         self.detection_radius = random.uniform(40, 70)
         self.speed = random.uniform(1.0, 2.0)
-        self.q_table = {} if brain is None else brain.q_table.copy()
-        self.brain = np.zeros(3)  # 3 actions: 0=wander, 1=seek_food, 2=flee_predator
+        self.q_table = q_table.copy() if q_table else {}
+        self.last_state = None
+        self.last_action = None
 
-    def perceive(self, food_near, pred_near):
-        """5-D perception: food_dist, food_angle, pred_dist, pred_angle, energy"""
+    def _state(self, food_near, pred_near):
+        """Coarse 5-D state: food_dist bin, food_angle bin, pred_dist bin, pred_angle bin, energy bin"""
+        fd = fa = pd = pa = ed = 0
         if food_near:
             f = min(food_near, key=lambda i: i[1])
-            fd = f[1] / self.detection_radius
-            fa = math.atan2(f[0].y - self.y, f[0].x - self.x) / math.pi
-        else:
-            fd, fa = 1.0, 0.0
+            fd = min(int(f[1] / self.detection_radius * 4), 4)
+            fa = int((math.atan2(f[0].y - self.y, f[0].x - self.x) / math.pi + 1) * 2) % 5
         if pred_near:
             p = min(pred_near, key=lambda i: i[1])
-            pd = min(p[1] / (self.detection_radius * 2), 1.0)
-            pa = math.atan2(p[0].y - self.y, p[0].x - self.x) / math.pi
+            pd = min(int(p[1] / (self.detection_radius * 2) * 4), 4)
+            pa = int((math.atan2(p[0].y - self.y, p[0].x - self.x) / math.pi + 1) * 2) % 5
+        ed = min(int(self.energy * 3), 4)
+        return (fd, fa, pd, pa, ed)
+
+    def act(self, food_near, pred_near, epsilon=0.1):
+        state = self._state(food_near, pred_near)
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(3)
+
+        if random.random() < epsilon:
+            action = random.randrange(3)
         else:
-            pd, pa = 1.0, 0.0
-        return np.array([fd, fa, pd, pa, self.energy / 2.0])
+            action = int(np.argmax(self.q_table[state]))
 
-    def act(self, perception, epsilon=0.1):
-        action = self.choose_action(perception, epsilon)
+        self.last_state = state
         self.last_action = action
-        self.last_state = self._discretize(perception)
 
-        target_angle = random.uniform(0, 2 * math.pi)
-        if action == 1 and perception[0] < 0.9:
-            target_angle = perception[1] * math.pi
-        elif action == 2 and perception[2] < 0.9:
-            target_angle = perception[3] * math.pi + math.pi
+        # Execute action
+        angle = random.uniform(0, 2 * math.pi)
+        if action == 1 and food_near:
+            f = min(food_near, key=lambda i: i[1])
+            angle = math.atan2(f[0].y - self.y, f[0].x - self.x)
+        elif action == 2 and pred_near:
+            p = min(pred_near, key=lambda i: i[1])
+            angle = math.atan2(self.y - p[0].y, self.x - p[0].x)
 
-        self.vx = math.cos(target_angle) * self.speed
-        self.vy = math.sin(target_angle) * self.speed
+        self.vx = math.cos(angle) * self.speed
+        self.vy = math.sin(angle) * self.speed
         self.x += self.vx
         self.y += self.vy
+        self._bounce()
 
+        return state
+
+    def _bounce(self):
         if self.x < 10:
             self.x = 10
             self.vx *= -1
@@ -207,49 +228,70 @@ class Prey(Agent):
             self.y = ARENA_H + 50
             self.vy *= -1
 
-        return self._discretize(perception)
-
-    def learn_step(self, reward, next_perception):
-        if self.last_state is not None and self.last_action is not None:
-            next_state = self._discretize(next_perception)
-            self.learn(self.last_state, self.last_action, reward, next_state)
+    def learn(self, reward, next_state):
+        if self.last_state is None:
+            return
+        if next_state not in self.q_table:
+            self.q_table[next_state] = np.zeros(3)
+        s = self.last_state
+        a = self.last_action
+        self.q_table[s][a] += 0.2 * (reward + 0.9 * np.max(self.q_table[next_state]) - self.q_table[s][a])
 
     def reproduce(self):
         self.energy *= 0.5
-        child = Prey(self.x + random.uniform(-10, 10), self.y + random.uniform(-10, 10))
-        child.q_table = {k: v.copy() for k, v in self.q_table.items()}
+        child = Prey(self.x + random.uniform(-10, 10), self.y + random.uniform(-10, 10),
+                     q_table={k: v.copy() for k, v in self.q_table.items()})
         child.detection_radius = max(25, min(80, self.detection_radius + random.uniform(-5, 5)))
         child.speed = max(0.8, min(2.5, self.speed + random.uniform(-0.1, 0.1)))
         child.energy = 1.0
         return child
 
 
-# --- Predator ---
-class Predator(Agent):
-    def __init__(self, x, y, brain=None):
-        super().__init__(x, y, brain=None)
-        self.detection_radius = random.uniform(80, 130)
-        self.speed = random.uniform(2.0, 3.5)
+# --- Predator: DQN Neural Net ---
+class PredatorDQN:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.vx, self.vy = 0.0, 0.0
+        self.energy = 2.5
         self.starve_counter = 0
-        self.energy = 2.0  # start with buffer
-        self.q_table = {} if brain is None else brain.q_table.copy()
-        self.brain = np.zeros(3)  # 3 actions: 0=turn_left, 1=turn_right, 2=straight
+        self.detection_radius = random.uniform(100, 150)
+        self.speed = random.uniform(2.0, 3.5)
         self.angle = random.uniform(0, 2 * math.pi)
+        self.q_net = DQN(input_dim=7, hidden_dim=64, output_dim=3).to(device)
+        self.target_net = DQN(input_dim=7, hidden_dim=64, output_dim=3).to(device)
+        self.target_net.load_state_dict(self.q_net.state_dict())
+        self.replay = ReplayBuffer()
+        self.optimizer = optim.Adam(self.q_net.parameters(), lr=LR)
+        self.last_state = None
+        self.last_action = None
+        self.steps_done = 0
+        self.total_loss = 0.0
+        self.loss_count = 0
 
     def perceive(self, nearest_prey):
-        """7-D: 3 nearest prey (dx, dy each), own velocity, energy"""
-        inputs = np.zeros(7)
+        """7 inputs: 3 nearest prey (dx, dy normalized), own energy"""
+        inputs = np.zeros(7, dtype=np.float32)
         for i, p in enumerate(nearest_prey[:3]):
             inputs[i * 2] = (p.x - self.x) / ARENA_W
             inputs[i * 2 + 1] = (p.y - self.y) / ARENA_H
-        inputs[6] = self.energy
+        inputs[6] = self.energy / 3.0
         return inputs
 
-    def act(self, perception, epsilon=0.1):
-        action = self.choose_action(perception, epsilon)
-        self.last_action = action
-        self.last_state = self._discretize(perception)
+    def act(self, perception, epsilon=None):
+        if epsilon is None:
+            epsilon = max(0.02, 1.0 - self.steps_done / 2000)
 
+        state_t = torch.tensor(perception, dtype=torch.float32, device=device).unsqueeze(0)
+        self.q_net.eval()
+        with torch.no_grad():
+            q_vals = self.q_net(state_t).squeeze()
+        action = int(q_vals.argmax().item()) if random.random() > epsilon else random.randrange(3)
+
+        self.last_state = perception
+        self.last_action = action
+        self.steps_done += 1
+
+        # Execute action: 0=left, 1=right, 2=straight
         if action == 0:
             self.angle -= 0.4
         elif action == 1:
@@ -259,7 +301,11 @@ class Predator(Agent):
         self.vy = math.sin(self.angle) * self.speed
         self.x += self.vx
         self.y += self.vy
+        self._bounce()
 
+        return perception
+
+    def _bounce(self):
         if self.x < 10:
             self.x = 10
             self.vx *= -1
@@ -277,19 +323,46 @@ class Predator(Agent):
             self.vy *= -1
             self.angle = math.atan2(self.vy, self.vx)
 
-        return self._discretize(perception)
+    def store(self, action, reward, next_perception, done):
+        ns = next_perception if not done else np.zeros(7, dtype=np.float32)
+        self.replay.push(self.last_state, action, reward, ns, float(done))
 
-    def learn_step(self, reward, next_perception):
-        if self.last_state is not None and self.last_action is not None:
-            next_state = self._discretize(next_perception)
-            self.learn(self.last_state, self.last_action, reward, next_state)
+    def learn_batch(self):
+        if len(self.replay) < BATCH_SIZE:
+            return 0.0
+        states, actions, rewards, next_states, dones = self.replay.sample()
+        s_t = torch.tensor(states, dtype=torch.float32, device=device)
+        a_t = torch.tensor(actions, dtype=torch.int64, device=device)
+        r_t = torch.tensor(rewards, dtype=torch.float32, device=device)
+        ns_t = torch.tensor(next_states, dtype=torch.float32, device=device)
+        d_t = torch.tensor(dones, dtype=torch.float32, device=device)
+
+        self.q_net.train()
+        q_sa = self.q_net(s_t).gather(1, a_t.unsqueeze(1)).squeeze()
+        with torch.no_grad():
+            q_target = r_t + GAMMA * (1 - d_t) * self.target_net(ns_t).max(1)[0]
+        loss = nn.MSELoss()(q_sa, q_target)
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), 1.0)
+        self.optimizer.step()
+
+        self.total_loss += loss.item()
+        self.loss_count += 1
+        return loss.item()
+
+    def update_target(self):
+        self.target_net.load_state_dict(self.q_net.state_dict())
+
+    def avg_loss(self):
+        return self.total_loss / max(self.loss_count, 1)
 
     def reproduce(self):
         self.energy *= 0.5
-        child = Predator(self.x, self.y)
-        child.q_table = {k: v.copy() for k, v in self.q_table.items()}
-        child.speed = max(1.5, min(4.0, self.speed + random.uniform(-0.2, 0.2)))
-        child.energy = 2.0
+        child = PredatorDQN(self.x, self.y)
+        child.q_net.load_state_dict(self.q_net.state_dict())
+        child.target_net.load_state_dict(self.target_net.state_dict())
+        child.energy = 2.5
         return child
 
 
@@ -312,14 +385,17 @@ class Stats:
     def __init__(self):
         self.prey_history = []
         self.pred_history = []
+        self.loss_history = []
         self.max_history = 300
 
-    def record(self, prey_count, pred_count):
+    def record(self, prey_count, pred_count, avg_loss=0.0):
         self.prey_history.append(prey_count)
         self.pred_history.append(pred_count)
+        self.loss_history.append(avg_loss)
         if len(self.prey_history) > self.max_history:
             self.prey_history.pop(0)
             self.pred_history.pop(0)
+            self.loss_history.pop(0)
 
 
 # --- World ---
@@ -335,7 +411,7 @@ def init():
     global prey_list, pred_list, food_list, stats, gen
     prey_list = [Prey(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50))
                  for _ in range(INITIAL_PREY)]
-    pred_list = [Predator(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50))
+    pred_list = [PredatorDQN(random.uniform(50, ARENA_W - 50), random.uniform(80, ARENA_H - 50))
                  for _ in range(INITIAL_PRED)]
     food_list = [Food() for _ in range(FOOD_COUNT)]
     stats = Stats()
@@ -347,25 +423,18 @@ init()
 running = True
 speed = 1
 show_graph = True
-epsilon = 0.2  # exploration rate
+global_epsilon = 0.2
+update_counter = 0
 
 
 def draw_agents():
-    """Batch render all agents efficiently."""
-    # Draw all food
     for f in food_list:
         pygame.draw.circle(screen, FOOD_COLOR, (int(f.x), int(f.y)), int(f.radius))
-
-    # Draw all prey (simple circles, no direction lines for performance)
-    prey_positions = [(int(p.x), int(p.y)) for p in prey_list]
-    prey_radii = [max(3, int(p.detection_radius * 0.12)) for p in prey_list]
-    for (x, y), r in zip(prey_positions, prey_radii):
-        pygame.draw.circle(screen, PREY_COLOR, (x, y), r)
-
-    # Draw all predators
+    for p in prey_list:
+        r = max(3, int(p.detection_radius * 0.12))
+        pygame.draw.circle(screen, PREY_COLOR, (int(p.x), int(p.y)), r)
     for pr in pred_list:
         pygame.draw.circle(screen, PRED_COLOR, (int(pr.x), int(pr.y)), 6)
-        # Direction indicator
         pygame.draw.line(screen, (255, 120, 120), (int(pr.x), int(pr.y)),
                          (int(pr.x + pr.vx * 7), int(pr.y + pr.vy * 7)), 2)
 
@@ -381,15 +450,11 @@ while running:
                 running = False
             elif event.key == pygame.K_SPACE:
                 speed = 5 if speed == 1 else 1
-                epsilon = 0.05 if speed > 1 else 0.2  # less explore at high speed
+                global_epsilon = 0.05 if speed > 1 else 0.2
             elif event.key == pygame.K_r:
                 init()
             elif event.key == pygame.K_g:
                 show_graph = not show_graph
-            elif event.key == pygame.K_PERIOD:
-                epsilon = max(0, epsilon - 0.05)
-            elif event.key == pygame.K_COMMA:
-                epsilon = min(0.5, epsilon + 0.05)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mx, my = pygame.mouse.get_pos()
             if ARENA_RECT.collidepoint(mx, my):
@@ -397,6 +462,7 @@ while running:
 
     for _ in range(speed):
         gen += 1
+        update_counter += 1
 
         spatial.clear()
         for p in prey_list:
@@ -407,73 +473,65 @@ while running:
         # --- Prey step ---
         new_prey = []
         for p in prey_list:
-            food_near = spatial.query_radius(p.x, p.y, p.detection_radius)
-            food_near = [(f, d) for f, d in food_near if isinstance(f, Food)]
-            pred_near = spatial.query_radius(p.x, p.y, p.detection_radius * 2)
-            pred_near = [(pr, d) for pr, d in pred_near if isinstance(pr, Predator)]
+            food_near = [(f, d) for f, d in spatial.query_radius(p.x, p.y, p.detection_radius) if isinstance(f, Food)]
+            pred_near = [(pr, d) for pr, d in spatial.query_radius(p.x, p.y, p.detection_radius * 2) if isinstance(pr, PredatorDQN)]
 
-            perception = p.perceive(food_near, pred_near)
-            next_state = p.act(perception, epsilon=epsilon)
+            state = p.act(food_near, pred_near, epsilon=global_epsilon)
 
-            # Learning: reward for eating, small reward for being near food
-            reward = -0.01  # default: slight penalty for existing
+            reward = -0.02
             eaten = False
             for food, dist in food_near:
-                if dist < p.detection_radius * 0.7:
+                if dist < p.detection_radius * 0.6:
                     reward = REWARD_GATHER
                     p.energy += 0.5
                     food.respawn()
                     eaten = True
                     break
-
             if not eaten and food_near:
-                nearest_dist = min(d for _, d in food_near)
-                reward += (1.0 - nearest_dist / p.detection_radius) * REWARD_CLOSER
-
+                reward += REWARD_CLOSER
             if pred_near:
-                nearest_pred_dist = min(d for _, d in pred_near)
-                if nearest_pred_dist < p.detection_radius:
-                    reward -= PENALTY_DANGER
+                reward -= PENALTY_DANGER
 
-            p.learn_step(reward, perception)
+            next_food = [(f, d) for f, d in spatial.query_radius(p.x, p.y, p.detection_radius) if isinstance(f, Food)]
+            next_pred = [(pr, d) for pr, d in spatial.query_radius(p.x, p.y, p.detection_radius * 2) if isinstance(pr, PredatorDQN)]
+            next_state = p._state(next_food, next_pred)
+            p.learn(reward, next_state)
             p.energy += 0.005
 
             if p.energy > PREY_REPRODUCE_THRESHOLD:
                 new_prey.append(p.reproduce())
-
-            if p.energy < PREY_DEATH_THRESHOLD:
-                p.energy -= 0.02
+            if p.energy < 0:
+                p.energy = -999  # mark dead
 
         prey_list.extend(new_prey)
-        prey_list = [p for p in prey_list if p.energy > 0]
+        prey_list = [p for p in prey_list if p.energy >= 0]
 
         # --- Predator step ---
         new_pred = []
+        total_loss = 0.0
+        loss_count = 0
         for pr in pred_list:
-            prey_in_range = spatial.query_radius(pr.x, pr.y, pr.detection_radius)
-            prey_in_range = [(p, d) for p, d in prey_in_range if isinstance(p, Prey)]
-            prey_candidates = [p for p, _ in prey_in_range]
-            nearest_prey = SpatialHash.nearest(pr.x, pr.y, prey_candidates, max_n=3)
+            prey_in = [(p, d) for p, d in spatial.query_radius(pr.x, pr.y, pr.detection_radius) if isinstance(p, Prey)]
+            prey_cands = [p for p, _ in prey_in]
+            nearest = SpatialHash.nearest(pr.x, pr.y, prey_cands, max_n=3)
 
-            # Track previous distance to nearest prey
-            prev_dist = float('inf')
-            if prey_candidates:
-                prev_dist = min(d for _, d in prey_in_range)
+            # Pad to 3
+            while len(nearest) < 3:
+                nearest.append(type('Dummy', (), {'x': pr.x, 'y': pr.y})())
 
-            perception = pr.perceive(nearest_prey)
-            next_state = pr.act(perception, epsilon=epsilon)
+            perception = pr.perceive(nearest)
+            epsilon = max(0.02, global_epsilon)
+            next_perception = pr.act(perception, epsilon=epsilon)
 
-            reward = -PENALTY_STARVE * 0.05
+            reward = -PENALTY_STARVE
             pr.starve_counter += 1
-            pr.energy -= PENALTY_STARVE * 0.02
+            pr.energy -= PENALTY_STARVE * 0.015
 
-            # Hunt learning: reward for getting closer
-            if prey_in_range:
-                curr_dist = min(d for _, d in prey_in_range)
-                if curr_dist < prev_dist:
-                    reward += REWARD_CLOSER * (1.0 - curr_dist / pr.detection_radius)
+            if prey_in:
+                curr_d = min(d for _, d in prey_in)
+                reward += REWARD_CLOSER * (1.0 - curr_d / pr.detection_radius)
 
-            # Catch
+            done = False
             caught = None
             for prey in list(prey_list):
                 if math.hypot(pr.x - prey.x, pr.y - prey.y) < 14:
@@ -482,65 +540,68 @@ while running:
                     pr.starve_counter = 0
                     reward = REWARD_CATCH
                     break
-
             if caught:
                 prey_list.remove(caught)
 
-            pr.learn_step(reward, perception)
+            pr.store(pr.last_action, reward, next_perception, done)
+            loss = pr.learn_batch()
+            if loss > 0:
+                total_loss += loss
+                loss_count += 1
 
             if pr.energy > PRED_REPRODUCE_THRESHOLD and len(new_pred) < 2:
                 new_pred.append(pr.reproduce())
-
             if pr.starve_counter > PRED_STARVE_STEPS:
-                pr.energy -= 0.1
+                pr.energy -= 0.15
+
+        if update_counter % TARGET_UPDATE == 0:
+            for pr in pred_list:
+                pr.update_target()
 
         pred_list.extend(new_pred)
         pred_list = [p for p in pred_list if p.energy > 0]
 
-        # Food respawn
         for f in food_list:
             if random.random() < FOOD_RESPAWN_RATE:
                 f.respawn()
 
-        stats.record(len(prey_list), len(pred_list))
+        avg_loss = total_loss / max(loss_count, 1) if loss_count else 0.0
+        stats.record(len(prey_list), len(pred_list), avg_loss)
 
     # --- Render ---
     screen.fill(BG)
     pygame.draw.rect(screen, (15, 15, 30), ARENA_RECT)
     pygame.draw.rect(screen, GRID_COLOR, ARENA_RECT, 1)
-
     draw_agents()
 
-    # Panel
     panel_rect = pygame.Rect(ARENA_W + 10, 10, WIDTH - ARENA_W - 20, HEIGHT - 20)
     pygame.draw.rect(screen, PANEL_BG, panel_rect, border_radius=6)
 
+    avg_loss = sum(p.avg_loss() for p in pred_list) / max(len(pred_list), 1)
     draw_text(screen, f"Gen: {gen}", (ARENA_W + 20, 20), WHITE)
     draw_text(screen, f"Prey: {len(prey_list)}", (ARENA_W + 20, 40), PREY_COLOR)
     draw_text(screen, f"Predators: {len(pred_list)}", (ARENA_W + 20, 60), PRED_COLOR)
     draw_text(screen, f"Speed: {speed}x [SPACE]", (ARENA_W + 20, HEIGHT - 90), WHITE)
-    draw_text(screen, f"Explore: {epsilon:.0%} [,/.]", (ARENA_W + 20, HEIGHT - 70), WHITE)
+    draw_text(screen, f"Explore: {global_epsilon:.0%}", (ARENA_W + 20, HEIGHT - 70), WHITE)
     draw_text(screen, "[R] Reset", (ARENA_W + 20, HEIGHT - 50), WHITE)
     draw_text(screen, "[Click] Add food", (ARENA_W + 20, HEIGHT - 30), WHITE)
 
-    # Graph
-    if show_graph:
+    if show_graph and len(stats.prey_history) > 1:
         graph_rect = pygame.Rect(GRAPH_X, GRAPH_Y, GRAPH_W, GRAPH_H)
         pygame.draw.rect(screen, (10, 10, 25), graph_rect, border_radius=4)
         pygame.draw.rect(screen, GRID_COLOR, graph_rect, 1)
 
-        if len(stats.prey_history) > 1:
-            max_val = max(max(stats.prey_history), max(stats.pred_history), 1)
-            pts_prey = [(GRAPH_X + int(i / stats.max_history * GRAPH_W),
-                         GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20)))
-                        for i, cnt in enumerate(stats.prey_history)]
-            pts_pred = [(GRAPH_X + int(i / stats.max_history * GRAPH_W),
-                         GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20)))
-                        for i, cnt in enumerate(stats.pred_history)]
-            if pts_prey:
-                pygame.draw.lines(screen, PREY_COLOR, False, pts_prey, 2)
-            if pts_pred:
-                pygame.draw.lines(screen, PRED_COLOR, False, pts_pred, 2)
+        max_val = max(max(stats.prey_history), max(stats.pred_history), 1)
+        pts_prey = [(GRAPH_X + int(i / stats.max_history * GRAPH_W),
+                     GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20)))
+                    for i, cnt in enumerate(stats.prey_history)]
+        pts_pred = [(GRAPH_X + int(i / stats.max_history * GRAPH_W),
+                     GRAPH_Y + GRAPH_H - int(cnt / max_val * (GRAPH_H - 20)))
+                    for i, cnt in enumerate(stats.pred_history)]
+        if pts_prey:
+            pygame.draw.lines(screen, PREY_COLOR, False, pts_prey, 2)
+        if pts_pred:
+            pygame.draw.lines(screen, PRED_COLOR, False, pts_pred, 2)
 
     pygame.display.flip()
 
