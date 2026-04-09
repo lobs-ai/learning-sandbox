@@ -49,18 +49,19 @@ def draw_text(surface, text, pos, color=None):
 # --- Constants ---
 FPS = 60
 ARENA_RECT = pygame.Rect(10, 50, ARENA_W, ARENA_H)
-INITIAL_PREY = 80
-INITIAL_PRED = 15
-FOOD_COUNT = 60
-PREY_REPRODUCE_THRESHOLD = 1.0
-PRED_REPRODUCE_THRESHOLD = 1.5
+INITIAL_PREY = 120
+INITIAL_PRED = 8
+FOOD_COUNT = 80
+PREY_REPRODUCE_THRESHOLD = 1.2
+PRED_REPRODUCE_THRESHOLD = 4.0
 PREY_DEATH_THRESHOLD = 0.0
-PRED_STARVE_STEPS = 200
-WEIGHT_MUTATION = 0.1
+PRED_STARVE_STEPS = 250
+WEIGHT_MUTATION = 0.08
 REWARD_GATHER = 0.3
-REWARD_CATCH = 2.0
+REWARD_CATCH = 3.0
+REWARD_NEAR_MISS = 0.05
 PENALTY_DANGER = 0.1
-PENALTY_STARVE = 0.5
+PENALTY_STARVE = 0.3
 SPEED_MULTIPLIER = 1
 CELL_SIZE = 50
 
@@ -258,7 +259,7 @@ class Prey:
                      self.brain.copy())
         child.detection_radius = max(15, min(80, self.detection_radius + random.uniform(-5, 5)))
         child.speed = max(0.5, min(2.5, self.speed + random.uniform(-0.1, 0.1)))
-        child.energy = 0.5
+        child.energy = 0.8
         return child
 
 
@@ -460,6 +461,12 @@ while running:
         # --- Predator step ---
         new_pred = []
         for pr in pred_list:
+            # Track previous distance to nearest prey for learning signal
+            prev_nearest_dist = None
+            if prey_list:
+                prev_nearest = min(prey_list, key=lambda p: math.hypot(pr.x - p.x, pr.y - p.y))
+                prev_nearest_dist = math.hypot(pr.x - prev_nearest.x, pr.y - prev_nearest.y)
+
             # Find 3 nearest prey using spatial hash (filter to Prey only)
             prey_in_range = spatial.query_radius(pr.x, pr.y, pr.detection_radius)
             prey_candidates = [item[0] for item in prey_in_range if isinstance(item[0], Prey)]
@@ -469,6 +476,18 @@ while running:
             pr.act(perception)
             pr.starve_counter += 1
             pr.energy -= PENALTY_STARVE * 0.01
+
+            # Hunt learning: reward for getting closer, small penalty for moving away
+            if prey_list:
+                curr_nearest = min(prey_list, key=lambda p: math.hypot(pr.x - p.x, pr.y - p.y))
+                curr_nearest_dist = math.hypot(pr.x - curr_nearest.x, pr.y - curr_nearest.y)
+                if prev_nearest_dist is not None and curr_nearest_dist < prev_nearest_dist:
+                    # Getting closer — positive reward scaled by proximity
+                    hunt_reward = REWARD_NEAR_MISS * (1.0 - min(curr_nearest_dist / pr.detection_radius, 1.0))
+                    pr.learn(hunt_reward)
+                elif prev_nearest_dist is not None and curr_nearest_dist > prev_nearest_dist + 5:
+                    # Moving away from nearest prey — small penalty
+                    pr.learn(-REWARD_NEAR_MISS * 0.5)
 
             # Catch prey
             caught = None
@@ -483,8 +502,8 @@ while running:
             if caught:
                 prey_list.remove(caught)
 
-            # Reproduce
-            if pr.energy > PRED_REPRODUCE_THRESHOLD:
+            # Reproduce (needs multiple catches, capped to avoid explosions)
+            if pr.energy > PRED_REPRODUCE_THRESHOLD and len(new_pred) < 3:
                 new_pred.append(pr.reproduce())
 
             # Starvation
