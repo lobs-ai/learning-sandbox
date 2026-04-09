@@ -1,167 +1,124 @@
-# Learning Sandbox — Design Doc
+# Obstacle Runner — 3D RL Agent
 
-*A personal sandbox where you watch evolution happen. Population dynamics, co-evolution, natural selection — visible in real time.*
-
----
-
-## The Core Experience
-
-You're not watching one agent learn. You're watching an **ecosystem**. Prey reproduce and die. Predators hunt and starve. Traits drift over generations. The population graph shows boom/bust cycles in real time. It never fully stabilizes.
-
-The rule: **if you can't watch it evolve in under 5 minutes, it's too complex.**
+## Concept
+A cube agent learns to navigate 3D obstacle courses using reinforcement learning. Start with simple gaps and platforms, progress to moving obstacles, timed jumps, and multi-stage courses. Watch the agent fail, learn, and eventually conquer levels it couldn't initially complete.
 
 ---
 
-## Predator / Prey — The Flagship Environment
+## Architecture
 
-### World
+### Tech Stack
+- **Rendering**: Ursina (Python 3D engine, simple primitives, cross-platform)
+- **Physics**: Custom AABB collision + gravity (no external physics engine needed for a cube)
+- **RL Brain**: DQN neural net (PyTorch) for discrete action selection
+- **Observation space**: Proprioceptive — agent velocity, position relative to goal, ground contact, nearby obstacle proximity (12 dims)
+- **Action space**: Discrete 6 — forward/back/left/right, jump, jump+forward
 
-- 2D bounded arena (top-down, clean geometric)
-- Prey are stationary. They don't move — they stand still and eat food that spawns around them.
-- Predators move. They hunt.
-- **Many of each:** 50–200 prey, 10–30 predators to start. Numbers fluctuate based on fitness.
+### Agent Actions
+| ID | Action |
+|----|--------|
+| 0 | Move forward |
+| 1 | Move backward |
+| 2 | Strafe left |
+| 3 | Strafe right |
+| 4 | Jump |
+| 5 | Jump + forward |
 
-### Prey Behavior
-
-- Prey are stationary but have a **food detection radius**. They "gather" food within range.
-- **Food** spawns randomly across the arena. Prey absorb food within their radius.
-- **Neural net brain:** MLP — inputs are nearby food positions + nearby predator positions, outputs are stay/expand/shrink detection radius.
-- Prey learn via policy gradient: reward = food gathered, penalty = predator proximity.
-- **Reproduction:** Offspring inherit trained weights + Gaussian mutation. Then continues learning from own experience.
-- **Death:** Prey starve if food is scarce.
-
-### Predator Behavior
-
-- Predators move toward nearby prey and catch them on contact.
-- **Catching a prey:** large reward, predator reproduces.
-- **Starving:** predators die if they haven't caught prey in N steps.
-- **Neural net brain:** MLP — inputs are nearby prey positions + own velocity + recent reward history, outputs are movement direction + speed.
-- Predators learn via DQN or policy gradient: reward = catching prey, penalty = time spent chasing without result.
-- **Reproduction:** Offspring inherit trained weights + Gaussian mutation. Then continues learning from own experience.
-
-### Co-Evolution Dynamics
-
-- More predators → prey population drops → predators starve → prey recover → predators rebound
-- Prey evolve larger detection radii when food is scarce
-- Predators evolve faster speeds when prey are evasive
-- Neither side ever wins permanently — the ratio oscillates
-
-### What You Watch
-
-- The arena: prey as small green dots (size = detection radius), predators as red dots (size = speed)
-- Food particles as white/yellow sparkles
-- Population graph in the corner: prey count and predator count over time
-- Trait histograms: distribution of detection radii and speeds
-- **The key moment:** a regime change — food becomes scarce, prey radii drift up, predators starve, prey boom, predators rebound with new strategies
-
-### Why It's Satisfying
-
-You're watching natural selection happen in real time. Not a single agent — a whole gene pool. The boom/bust cycles are mesmerizing. You can change parameters (food spawn rate, arena size, predator starting count) and watch the ecosystem respond.
+### Reward Signals
+- **Reaching goal**: +100
+- **Moving toward goal**: +distance_reduction × 10
+- **Moving away**: -5
+- **Falling off**: -50
+- **Step penalty**: -0.1 (encourages speed)
+- **Time penalty**: -0.5/s (encourages efficiency)
 
 ---
 
-## Population Stats Panel
+## Level Progression
 
-Real-time graphs:
-- Prey population over time (green line)
-- Predator population over time (red line)
-- Average prey detection radius (drifting up/down)
-- Average predator speed (drifting up/down)
-- Food availability (white line)
-- Capture rate per predator per minute
+### Level 1 — "First Steps"
+Flat platform with one gap (2 units wide). Agent must jump across.
+- Mostly solvable by random exploration
+- Teaches: jump timing
 
----
+### Level 2 — "The Hop"
+Three platforms at increasing heights, gaps between each.
+- Requires precise jump + forward timing
+- Teaches: jump arc, height
 
-## Parameters (User-Controllable)
+### Level 3 — "Narrow Path"
+Platform narrows to 1 unit wide, then widens again.
+- Tests precision movement
+- Teaches: strafe control
 
-- Initial prey count
-- Initial predator count
-- Food spawn rate
-- Food consumption = reproduction threshold
-- Mutation rate for offspring traits
-- Arena size
-- Simulation speed (1x, 2x, 5x, 10x)
+### Level 4 — "The Climb"
+Staircase of 5 platforms, each slightly higher.
+- Must chain multiple jumps
+- Teaches: chained actions
 
----
+### Level 5 — "Moving Target"
+Platform with a moving block that sweeps across the path.
+- Agent must time movement through gaps
+- Teaches: timing, prediction
 
-## Visual Style
-
-- Dark background arena
-- Prey: green circles, radius proportional to detection range
-- Predators: red circles, radius proportional to speed
-- Food: small white/yellow particles with subtle glow
-- Population graph: dark panel, bright colored lines
-- Trait histograms: overlaid on population graph or in a separate panel
-
-Font: monospace or geometric sans. Not cartoony — scientific/minimal.
+### Level 6+ — "Gauntlet"
+Combines all previous challenges + new elements (timed doors, smaller platforms, longer gaps).
 
 ---
 
-## Technical Approach
+## Neural Network Architecture
 
-**Stack:** Python + Pygame (or HTML Canvas for web-based rendering)
-
-**Agent learning:**
-- **Both:** neural net brains (MLP), both trained via policy gradient or DQN.
-- Prey: inputs = food positions + predator positions, outputs = detection radius action. Reward = food gathered, penalty = predator proximity.
-- Predators: inputs = prey positions + velocity + reward history, outputs = movement. Reward = prey caught, penalty = time chasing without result.
-- **Both:** reproduction passes down trained weights with mutation. Offspring continues learning from own experience. The brain learns, selection shapes who reproduces.
-
-**Population management:**
-- Each step: predators act → prey feed → reproduction/death events
-- Reproduction: asexual for simplicity (or sexual if we want to mix traits)
-- Mutation: Gaussian noise added to offspring traits
-
-**Simulation loop:**
 ```
-while running:
-    food_spawn()
-    for predator in predators:
-        predator.choose_action(state) → move
-        if catches_prey(): predator.reproduce(), prey.die()
-    for prey in prey:
-        prey.gather_food()
-        if food_threshold_met(): prey.reproduce()
-    predators -= starvation()
-    prey -= starvation()
-    record_stats()
-    render()
+Input: 12 dims
+  - agent velocity (3)
+  - agent to goal vector normalized (3)
+  - ground contact (1)
+  - distance to nearest obstacle (1)
+  - obstacle relative position if nearest (3)
+  - time alive normalized (1)
+
+Hidden: 128 ReLU
+
+Output: 6 (Q-values per action)
 ```
 
-**Performance:** 200 agents + simple physics + canvas rendering → runs at 60fps on modern hardware.
+Training: DQN with experience replay, target network, epsilon-greedy exploration.
 
 ---
 
-## MVP Scope
+## Rendering
 
-**Version 1:**
-- One arena
-- Evolutionary prey (trait = detection radius)
-- RL predators (neural net trained via reward)
-- Population graph
-- Adjustable simulation speed
-- Adjustable starting parameters
-
-**Post-MVP:**
-- Multiple arenas (compare runs)
-- Sexual reproduction
-- Predator trait evolution (speed + sensing)
-- Spatial structure (food gradients, walls)
-- Export population data
+- **Ursina** window 800×600
+- Agent: white cube with colored trail showing recent path
+- Platforms: dark gray with subtle grid texture (via color)
+- Goal: glowing green platform
+- Obstacles: red/orange blocks
+- UI overlay: current level, episode count, success rate, epsilon
 
 ---
 
-## Why This Is Better Than the Original
-
-Single-agent learning shows one mind figuring things out. Population dynamics show **evolution** — emergent strategies, trait drift, co-evolutionary arms races. The history of life on Earth in miniature.
-
-It's also more visually interesting: you're watching hundreds of entities, not one cube. The population graph going up and down is inherently satisfying to watch.
+## Controls
+- `SPACE` — restart current episode
+- `N` — next level (skip)
+- `R` — reset to level 1
+- `,/.` — decrease/increase epsilon (exploration)
 
 ---
 
-## Open Questions
+## Success Criteria
+An agent that:
+1. Completes Level 1 within 20 episodes
+2. Completes Level 3 within 100 episodes
+3. Shows visibly improving performance on graph over time
+4. Can complete all 5 levels in under 1000 episodes
 
-- **Predator learning vs. evolution:** Should predators also evolve (speed as a trait), or is the neural net enough?
-- **Prey movement:** Keep them fully stationary, or give them a small random drift?
-- **Rendering:** Python + Pygame (fast, simple) or HTML Canvas (sharper, easier to deploy)?
-- **Multi-species:** Add a second predator type that uses a different strategy?
+---
+
+## File Structure
+```
+obstacle_runner.py   — main game + training loop
+level.py             — level definitions
+agent.py             — DQN brain, experience replay
+design.md            — this file
+requirements.txt     — ursina, torch, numpy
+```
