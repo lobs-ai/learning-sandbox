@@ -11,6 +11,7 @@ import numpy as np
 
 # Initialize pygame
 pygame.init()
+pygame.font.init()
 
 # Screen
 WIDTH, HEIGHT = 1200, 700
@@ -21,7 +22,7 @@ GRAPH_W, GRAPH_H = 250, 200
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Learning Sandbox")
 clock = pygame.time.Clock()
-font = pygame.font.SysFont("monospace", 12)
+font = pygame.font.Font(None, 14)
 
 # Colors
 BG = (10, 10, 20)
