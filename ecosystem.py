@@ -111,16 +111,18 @@ class SpatialHash:
 class Prey:
     def __init__(self, x, y, brain=None):
         self.x, self.y = x, y
+        self.vx, self.vy = 0, 0
         self.energy = 0.5
         self.detection_radius = random.uniform(30, 60)
+        self.speed = random.uniform(0.8, 1.5)
         self.age = 0
         self.last_danger = 0
-        self.brain = brain if brain else MLP(input_dim=5, hidden_dim=8, output_dim=2)
+        self.brain = brain if brain else MLP(input_dim=5, hidden_dim=8, output_dim=3)
         self.accumulated_gradient_fc1 = np.zeros_like(self.brain.fc1)
         self.accumulated_gradient_fc2 = np.zeros_like(self.brain.fc2)
         self.activation_history = []
 
-    def perceive(self, food_list, predators, arena_w, arena_h):
+    def perceive(self, food_list, predators):
         # Normalized inputs
         nearest_food = min(food_list, key=lambda f: math.hypot(f.x - self.x, f.y - self.y), default=None)
         nearest_pred = min(predators, key=lambda p: math.hypot(p.x - self.x, p.y - self.y), default=None)
@@ -136,11 +138,51 @@ class Prey:
     def act(self, perception):
         logits = self.brain.forward(perception)
         action = np.argmax(logits)
-        # Actions: 0=shrink, 1=expand
-        if action == 0:
-            self.detection_radius = max(10, self.detection_radius - 1.5)
+        # Actions: 0=seek food, 1=flee predator, 2=wander
+        target_x, target_y = self.x, self.y
+
+        if action == 0 and perception[0] < 1.0:
+            # Seek nearest food
+            angle = perception[1] * math.pi
+            target_x = self.x + math.cos(angle) * 50
+            target_y = self.y + math.sin(angle) * 50
+        elif action == 1 and perception[2] < 1.0:
+            # Flee from predator
+            angle = perception[3] * math.pi
+            target_x = self.x - math.cos(angle) * 50
+            target_y = self.y - math.sin(angle) * 50
         else:
-            self.detection_radius = min(80, self.detection_radius + 1.5)
+            # Wander
+            target_x = self.x + random.uniform(-20, 20)
+            target_y = self.y + random.uniform(-20, 20)
+
+        # Move toward target
+        dx = target_x - self.x
+        dy = target_y - self.y
+        dist = math.hypot(dx, dy)
+        if dist > 0.1:
+            self.vx = (dx / dist) * self.speed
+            self.vy = (dy / dist) * self.speed
+        else:
+            self.vx *= 0.8
+            self.vy *= 0.8
+
+        self.x += self.vx
+        self.y += self.vy
+
+        # Bounce off walls
+        if self.x < 10:
+            self.x = 10
+            self.vx *= -1
+        if self.x > ARENA_W + 10:
+            self.x = ARENA_W + 10
+            self.vx *= -1
+        if self.y < 50:
+            self.y = 50
+            self.vy *= -1
+        if self.y > ARENA_H + 50:
+            self.y = ARENA_H + 50
+            self.vy *= -1
 
     def learn(self, reward):
         # Simple REINFORCE-like weight update
@@ -152,6 +194,7 @@ class Prey:
         self.energy *= 0.5
         child = Prey(self.x + random.uniform(-10, 10), self.y + random.uniform(-10, 10), self.brain.copy())
         child.detection_radius = self.detection_radius + random.uniform(-5, 5)
+        child.speed = max(0.5, min(2.5, self.speed + random.uniform(-0.1, 0.1)))
         child.energy = 0.5
         return child
 
@@ -310,21 +353,22 @@ while running:
         # Prey step
         new_prey = []
         for p in prey_list:
-            perception = p.perceive(food_list, pred_list, ARENA_W, ARENA_H)
+            perception = p.perceive(food_list, pred_list)
             p.act(perception)
 
             # Gather food
-            nearby_food = spatial.query(p.x, p.y, p.detection_radius)
-            for food, dist in nearby_food:
-                if food in food_list:
+            eaten = False
+            for food in food_list:
+                if math.hypot(p.x - food.x, p.y - food.y) < p.detection_radius:
                     p.energy += REWARD_GATHER
                     p.learn(REWARD_GATHER)
                     food.respawn()
+                    eaten = True
+                    break
 
-            # Check danger
-            nearby_pred = spatial.query(p.x, p.y, p.detection_radius * 1.5)
-            danger = any(isinstance(obj, Predator) for obj, _ in nearby_pred)
-            if danger:
+            # Check danger - flee if predator nearby
+            nearest_pred = min(pred_list, key=lambda pr: math.hypot(p.x - pr.x, p.y - pr.y), default=None)
+            if nearest_pred and math.hypot(p.x - nearest_pred.x, p.y - nearest_pred.y) < p.detection_radius * 2:
                 p.learn(-PENALTY_DANGER)
 
             # Reproduce
@@ -394,6 +438,10 @@ while running:
     for p in prey_list:
         r = max(3, int(p.detection_radius * 0.15))
         pygame.draw.circle(screen, PREY_COLOR, (int(p.x), int(p.y)), r)
+        # Direction indicator
+        if abs(p.vx) > 0.1 or abs(p.vy) > 0.1:
+            pygame.draw.line(screen, (100, 255, 150), (int(p.x), int(p.y)),
+                             (int(p.x + p.vx * 6), int(p.y + p.vy * 6)), 1)
 
     # Predators
     for pr in pred_list:
