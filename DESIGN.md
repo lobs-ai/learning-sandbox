@@ -1,246 +1,163 @@
 # Learning Sandbox — Design Doc
 
-*A digital ecosystem. Many agents, co-evolution, survival. Watch selection happen in real time.*
+*A personal sandbox where you watch evolution happen. Population dynamics, co-evolution, natural selection — visible in real time.*
 
 ---
 
-## The Concept
+## The Core Experience
 
-An artificial life sandbox — not a single learning agent, but a population of agents that compete, survive, and evolve. Prey stand still to eat, predators hunt prey. The ones that are better at surviving reproduce, their offspring inherit traits, and the population changes over time. You watch selection happen.
+You're not watching one agent learn. You're watching an **ecosystem**. Prey reproduce and die. Predators hunt and starve. Traits drift over generations. The population graph shows boom/bust cycles in real time. It never fully stabilizes.
 
-Not watching one agent learn. Watching an ecosystem evolve.
-
----
-
-## The Simulation
-
-**World:** 2D grid. Continuous — agents exist at positions, not locked to cells. Food spawns in patches. Prey congregate around food. Predators hunt prey.
-
-**Prey:**
-- Stand still to gather food from patches
-- Move away from nearby predators (flee)
-- Reproduce when food intake exceeds threshold
-- Offspring inherit parent's speed + perception radius with small random mutation
-- Die if a predator catches them
-
-**Predators:**
-- Move toward nearby prey (hunt)
-- Reproduce when prey consumption exceeds threshold
-- Offspring inherit parent's speed + hunt accuracy with small random mutation
-- Die if they don't eat for too long (starvation)
-
-**What you watch:**
-- Population curves: prey count and predator count over time. Classic Lotka-Volterra dynamics — boom and bust cycles, predator-prey oscillations, eventual equilibrium or collapse.
-- Agent traits evolving: early prey are slow, clumsy. Over generations, you see faster prey that detect predators from farther away. Same for predators — better hunters emerge.
-- Spatial patterns: prey flocking behavior emerges naturally. Predators form pack-like hunting patterns.
-
-**The moment:** when a new predator mutation makes them significantly better hunters — prey population crashes, predators spike, then prey adapts, population rebounds. Watching the arms race in real time.
+The rule: **if you can't watch it evolve in under 5 minutes, it's too complex.**
 
 ---
 
-## Visual Design
+## Predator / Prey — The Flagship Environment
 
-Minimalist geometric. You need to see hundreds of agents at once.
+### World
 
-- **Prey:** small green dots
-- **Predators:** slightly larger red dots
-- **Food patches:** soft yellow glow regions
-- **Background:** near-black, subtle grid optional
+- 2D bounded arena (top-down, clean geometric)
+- Prey are stationary. They don't move — they stand still and eat food that spawns around them.
+- Predators move. They hunt.
+- **Many of each:** 50–200 prey, 10–30 predators to start. Numbers fluctuate based on fitness.
 
-No textures, no sprites. Pure shape and motion. The graph is as important as the simulation — population curves overlaid, updating in real time.
+### Prey Behavior
+
+- Prey are stationary but have a **food detection radius**. They "gather" food within range.
+- **Food** spawns randomly across the arena. Prey absorb food within their radius.
+- **Fitness:** Prey that gather more food reproduce faster. Offspring inherit their detection radius ± mutation.
+- **Death:** Prey starve if food is scarce (food respawns slowly, competition matters).
+- **Trait under selection:** detection radius — larger = more food, but also potentially more visible to predators.
+
+### Predator Behavior
+
+- Predators move toward nearby prey and catch them on contact.
+- **Catching a prey:** large reward, predator reproduces.
+- **Starving:** predators die if they haven't caught prey in N steps.
+- **Trait under selection:** **speed** and **chase persistence** — faster predators catch more prey, but chasing one prey too long means missing others.
+- Neural net or Q-learning: predators learn which prey to target (closest? weakest? random?).
+
+### Co-Evolution Dynamics
+
+- More predators → prey population drops → predators starve → prey recover → predators rebound
+- Prey evolve larger detection radii when food is scarce
+- Predators evolve faster speeds when prey are evasive
+- Neither side ever wins permanently — the ratio oscillates
+
+### What You Watch
+
+- The arena: prey as small green dots (size = detection radius), predators as red dots (size = speed)
+- Food particles as white/yellow sparkles
+- Population graph in the corner: prey count and predator count over time
+- Trait histograms: distribution of detection radii and speeds
+- **The key moment:** a regime change — food becomes scarce, prey radii drift up, predators starve, prey boom, predators rebound with new strategies
+
+### Why It's Satisfying
+
+You're watching natural selection happen in real time. Not a single agent — a whole gene pool. The boom/bust cycles are mesmerizing. You can change parameters (food spawn rate, arena size, predator starting count) and watch the ecosystem respond.
 
 ---
 
-## Interactions
+## Population Stats Panel
 
-- **Spawn controls:** set initial prey and predator counts
-- **Speed slider:** watch at 1x, 10x, or 100x speed
-- **Reset:** new random population, fresh evolution
-- **Trait inspector:** click any agent to see its stats (speed, perception radius, age, offspring count)
-- **Add disturbance:** drop a predator boom or prey plague to see how the ecosystem responds
+Real-time graphs:
+- Prey population over time (green line)
+- Predator population over time (red line)
+- Average prey detection radius (drifting up/down)
+- Average predator speed (drifting up/down)
+- Food availability (white line)
+- Capture rate per predator per minute
+
+---
+
+## Parameters (User-Controllable)
+
+- Initial prey count
+- Initial predator count
+- Food spawn rate
+- Food consumption = reproduction threshold
+- Mutation rate for offspring traits
+- Arena size
+- Simulation speed (1x, 2x, 5x, 10x)
+
+---
+
+## Visual Style
+
+- Dark background arena
+- Prey: green circles, radius proportional to detection range
+- Predators: red circles, radius proportional to speed
+- Food: small white/yellow particles with subtle glow
+- Population graph: dark panel, bright colored lines
+- Trait histograms: overlaid on population graph or in a separate panel
+
+Font: monospace or geometric sans. Not cartoony — scientific/minimal.
 
 ---
 
 ## Technical Approach
 
-**Stack:** Python + Pygame (2D rendering), or Three.js if we want 3D later.
+**Stack:** Python + Pygame (or HTML Canvas for web-based rendering)
 
-**Physics:** Simple 2D positions, velocity vectors, perception radius checks.
+**Agent learning:**
+- Prey: evolutionary (no neural net needed — trait inheritance + selection is the "learning")
+- Predators: neural net (simple MLP) or Q-table that learns prey targeting strategy, trained via reward from successful catches
 
-**Evolution:** Each agent has a trait vector [speed, perception_radius]. On reproduction, offspring traits = parent traits + small Gaussian noise. No genetic algorithms library needed — simple float vectors.
+**Population management:**
+- Each step: predators act → prey feed → reproduction/death events
+- Reproduction: asexual for simplicity (or sexual if we want to mix traits)
+- Mutation: Gaussian noise added to offspring traits
 
 **Simulation loop:**
-1. All predators move toward nearest prey in perception range
-2. All prey move away from nearest predator in perception range (or toward food if no predator nearby)
-3. Food patches grow slowly
-4. Eating → energy gain. Energy threshold → reproduction.
-5. No energy → death.
-6. Render + update population graphs
+```
+while running:
+    food_spawn()
+    for predator in predators:
+        predator.choose_action(state) → move
+        if catches_prey(): predator.reproduce(), prey.die()
+    for prey in prey:
+        prey.gather_food()
+        if food_threshold_met(): prey.reproduce()
+    predators -= starvation()
+    prey -= starvation()
+    record_stats()
+    render()
+```
 
-**Performance:** 500+ agents should run smoothly. Use spatial hashing for O(n) nearest-neighbor queries instead of O(n²).
+**Performance:** 200 agents + simple physics + canvas rendering → runs at 60fps on modern hardware.
 
 ---
 
 ## MVP Scope
 
-**First build:**
-- 2D world, ~200 prey + 20 predators
-- Simple flee/hunt behaviors
-- Food patches, eating, reproduction
-- Trait inheritance with mutation
-- Population graphs (prey count, predator count over time)
-- Speed controls, reset button
+**Version 1:**
+- One arena
+- Evolutionary prey (trait = detection radius)
+- RL predators (neural net trained via reward)
+- Population graph
+- Adjustable simulation speed
+- Adjustable starting parameters
 
 **Post-MVP:**
-- Multiple predator species (different hunt strategies)
-- Prey flocking behaviors
-- Environmental changes (food scarcity events, predator plagues)
-- 3D version
+- Multiple arenas (compare runs)
+- Sexual reproduction
+- Predator trait evolution (speed + sensing)
+- Spatial structure (food gradients, walls)
+- Export population data
 
 ---
 
-## Why This Is Interesting
+## Why This Is Better Than the Original
 
-Most ML demos show one agent learning. This shows an **ecosystem** learning. The emergent behaviors — flocking, pack hunting, boom-bust cycles — aren't programmed, they arise. Selection happens and you watch it.
+Single-agent learning shows one mind figuring things out. Population dynamics show **evolution** — emergent strategies, trait drift, co-evolutionary arms races. The history of life on Earth in miniature.
 
-The arms race between prey and predator speed/perception is visible in the trait distributions over time. You can see evolution happening.
-
----
-
-## Open Questions
-
-- **Grid vs continuous:** Locked to cells or free movement?
-- **Reproduction:** Sexual (two parents) or asexual (one parent)?
-- **Mutation rate:** How fast do traits drift?
-
----
-
-## Environments
-
-### 1. Avoid the Red
-
-**World:** 2D grid. Red zones spawn randomly. Green zones are safe.
-
-**Agent:** Moves in 4 directions. Reward = time spent in green. Penalty = time spent in red.
-
-**What you watch:** The agent starts dying constantly. Within 2-3 minutes, it learns to identify and avoid red zones. When you move the red zones, it relearns. When you add more red, it adapts density tolerance.
-
-**Why it's satisfying:** Immediate feedback loop. Every failure is visible. Every improvement is visible.
-
-**Complexity:** Trivial. Single state = current cell color. 4 actions. Q-table works fine.
-
----
-
-### 2. Predator / Prey
-
-**World:** 2D grid. One predator agent, one prey agent.
-
-**Predator goal:** Catch the prey. Reward = catching, penalty = time spent chasing.
-**Prey goal:** Avoid the predator. Reward = surviving, penalty = getting caught.
-
-**What you watch:** Early on, the prey moves randomly and gets caught often. The predator learns to corner. Then the prey learns to run to walls, use edges as shields. The predator adapts. Neither fully wins — it becomes an arms race that never fully settles.
-
-**Why it's interesting:** The co-evolution is visible. Both agents are learning simultaneously, each other's learning changes the problem.
-
-**Complexity:** Medium. Both agents see each other's position. Training is asymmetric — one learns to chase, one learns to flee.
-
----
-
-### 3. Foraging
-
-**World:** 2D grid. Food items scatter randomly. Agent must collect as many as possible.
-
-**Agent goal:** Move to maximize food collected. Reward = food collected, small penalty per step (to encourage efficiency).
-
-**What you watch:** Early path is chaotic, lots of backtracking. Over time the agent develops efficient routes, minimizes redundant movement. You can change food density and watch it adapt its strategy.
-
-**Why it's satisfying:** Efficiency improvement is concrete and measurable. Path length graphs go down visibly.
-
-**Complexity:** Low. State = nearby food positions + current position. Q-table or policy gradient.
-
----
-
-### 4. Matching Pennies
-
-**World:** A simple adversarial game. You (the human) play against the agent.
-
-**Rules:** Both players choose heads or tails simultaneously. If they match, you win. If they don't, the agent wins.
-
-**Agent goal:** Learn your pattern and exploit it.
-
-**What you watch:** At first the agent plays randomly. Then it starts noticing patterns in your play. If you switch to a counter-strategy, it adapts. By minute 5, it usually has a significant edge. It's unsettling how fast it figures you out.
-
-**Why it's compelling:** The agent is learning about *you*. It has a model of your behavior. When it exploits a pattern you didn't know you had, it's genuinely eerie.
-
-**Complexity:** Very low. State = your last N choices. Actions = heads/tails.
-
----
-
-### 5. Ant Trail
-
-**World:** 2D grid. A food source at a fixed location. A trail of pheromone markers the agent lays down.
-
-**Agent goal:** Find the food, return home. Reward = food collected. The trail is the memory — it decays over time, but the agent can lay new markers.
-
-**What you watch:** Early on, the agent wanders randomly. Then you see faint trails form. The agent learns to follow its own trails. When food is relocated, the old trails decay and new ones form. Shows memory + relearning in a way that's visually intuitive.
-
-**Why it's good:** Pheromone trails are a beautiful primitive for emergent behavior. Simple rules, complex looking strategies.
-
-**Complexity:** Medium. State = current position + nearby pheromone levels + food/hom direction. Needs a simple physics layer for pheromone diffusion.
-
----
-
-## Technical Approach
-
-**Stack:** Python + Pygame (2D), or Three.js (3D). Local only.
-
-**Agent:** Q-learning or policy gradient depending on complexity. Start with Q-table for simple environments.
-
-**State management:** Single Python process. Agent state lives in memory, persists to disk on demand (JSON weights).
-
-**No streaming:** Everything runs locally. You watch by having the window open.
-
-**Adding new environments:** Each environment is a class with `reset()`, `step(action)`, `render()`. Swap environments by changing a config or flag.
-
----
-
-## MVP Scope
-
-**First build:**
-- Avoid the Red (primary — fastest to show learning)
-- Predator/Prey (secondary — shows multi-agent)
-- Foraging (tertiary — shows efficiency)
-
-**Not in first build:** Matching Pennies, Ant Trail. Add later as the platform matures.
-
-**What ships:**
-- One codebase
-- Three environments
-- A simple UI that lets you switch between them
-- Weight persistence (save/restore agent state to disk)
-- A "reset" button to retrain from scratch
-
----
-
-## Why Not WebSockets / Streaming
-
-This is intentionally local and simple. The value is in watching the simulation, not in having it accessible remotely. Running on Rafe's machine means zero latency, zero deployment complexity, zero server costs.
-
-Streaming is a future feature if we ever want to share live simulations. For now, it adds nothing.
-
----
-
-## The Platform Vision (Later)
-
-Eventually this becomes a platform: a launcher that hosts multiple environments, tracks all your agents across sessions, lets you compare learning curves, and shares interesting agents with others.
-
-But version 1 is just: one repo, three environments, runs locally, something you'd actually open.
+It's also more visually interesting: you're watching hundreds of entities, not one cube. The population graph going up and down is inherently satisfying to watch.
 
 ---
 
 ## Open Questions
 
-- **Visual style:** Retro pixel art? Clean geometric? Minimalist neon?
-- **3D:** Does a 3D version of Avoid the Red make sense, or is 2D sufficient for the first build?
-- **Interaction:** Should you be able to intervene in real-time (move obstacles, teleport agent) or just watch?
-- **Human in the loop:** Is Matching Pennies the only human-facing one, or do other environments support human intervention?
+- **Predator learning vs. evolution:** Should predators also evolve (speed as a trait), or is the neural net enough?
+- **Prey movement:** Keep them fully stationary, or give them a small random drift?
+- **Rendering:** Python + Pygame (fast, simple) or HTML Canvas (sharper, easier to deploy)?
+- **Multi-species:** Add a second predator type that uses a different strategy?
