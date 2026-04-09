@@ -25,17 +25,21 @@ The rule: **if you can't watch it evolve in under 5 minutes, it's too complex.**
 
 - Prey are stationary but have a **food detection radius**. They "gather" food within range.
 - **Food** spawns randomly across the arena. Prey absorb food within their radius.
-- **Fitness:** Prey that gather more food reproduce faster. Offspring inherit their detection radius ± mutation.
+- **Neural net brain:** Each prey has a small MLP — inputs are nearby food positions + nearby predator positions, outputs are stay/expand/shrink detection radius.
+- Prey learn via policy gradient: reward = food gathered, penalty = predator proximity.
+- **Reproduction:** Offspring inherit parent's trained weights + Gaussian mutation. Then continues learning from own experience.
 - **Death:** Prey starve if food is scarce (food respawns slowly, competition matters).
-- **Trait under selection:** detection radius — larger = more food, but also potentially more visible to predators.
+- **Trait under selection:** detection radius + learning rate — evolves via selection, but the brain learns.
 
 ### Predator Behavior
 
 - Predators move toward nearby prey and catch them on contact.
 - **Catching a prey:** large reward, predator reproduces.
 - **Starving:** predators die if they haven't caught prey in N steps.
-- **Trait under selection:** **speed** and **chase persistence** — faster predators catch more prey, but chasing one prey too long means missing others.
-- Neural net or Q-learning: predators learn which prey to target (closest? weakest? random?).
+- **Neural net brain:** MLP — inputs are nearby prey positions + own velocity + recent reward history, outputs are movement direction + speed.
+- Predators learn via DQN or policy gradient: reward = catching prey, penalty = time spent chasing without result.
+- **Reproduction:** Offspring inherit parent's trained weights + Gaussian mutation. Then continues learning from own experience.
+- **Trait under selection:** speed + perception range + learning rate — evolves via selection, but the brain actually learns from experience.
 
 ### Co-Evolution Dynamics
 
@@ -100,8 +104,9 @@ Font: monospace or geometric sans. Not cartoony — scientific/minimal.
 **Stack:** Python + Pygame (or HTML Canvas for web-based rendering)
 
 **Agent learning:**
-- Prey: evolutionary (no neural net needed — trait inheritance + selection is the "learning")
-- Predators: neural net (simple MLP) or Q-table that learns prey targeting strategy, trained via reward from successful catches
+- Prey: small MLP neural net trained via policy gradient. Inputs = perception state. Outputs = action logits. Reward signal = food gathered.
+- Predators: small MLP neural net trained via DQN or policy gradient. Inputs = prey positions + velocity + reward history. Outputs = movement. Reward signal = prey caught.
+- **Both:** reproduction passes down trained weights with mutation. Offspring continues learning from own experience. The brain learns, not just the population.
 
 **Population management:**
 - Each step: predators act → prey feed → reproduction/death events
