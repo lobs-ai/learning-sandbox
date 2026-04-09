@@ -225,7 +225,7 @@ class Predator:
         self.starve_counter = 0
         self.detection_radius = random.uniform(60, 100)
         self.speed = random.uniform(1.5, 2.5)
-        self.brain = brain if brain else MLP(input_dim=8, hidden_dim=10, output_dim=3)
+        self.brain = brain if brain else MLP(input_dim=9, hidden_dim=10, output_dim=3)
         self.last_reward = 0
 
     def perceive(self, prey_list):
