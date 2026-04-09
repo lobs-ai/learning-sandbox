@@ -1,14 +1,117 @@
 # Learning Sandbox — Design Doc
 
-*A collection of simple ML environments where you watch agents learn. Local-only, no streaming, no server. Run it on your machine.*
+*A digital ecosystem. Many agents, co-evolution, survival. Watch selection happen in real time.*
 
 ---
 
 ## The Concept
 
-A personal sandbox of learning simulations — small worlds where agents figure things out, visually. Not a demo, not a research tool. Something you'd keep open on a second monitor and occasionally glance at while working, like a lava lamp for machine learning.
+An artificial life sandbox — not a single learning agent, but a population of agents that compete, survive, and evolve. Prey stand still to eat, predators hunt prey. The ones that are better at surviving reproduce, their offspring inherit traits, and the population changes over time. You watch selection happen.
 
-The rule: **if you can't watch it learn in under 5 minutes, it's too complex.**
+Not watching one agent learn. Watching an ecosystem evolve.
+
+---
+
+## The Simulation
+
+**World:** 2D grid. Continuous — agents exist at positions, not locked to cells. Food spawns in patches. Prey congregate around food. Predators hunt prey.
+
+**Prey:**
+- Stand still to gather food from patches
+- Move away from nearby predators (flee)
+- Reproduce when food intake exceeds threshold
+- Offspring inherit parent's speed + perception radius with small random mutation
+- Die if a predator catches them
+
+**Predators:**
+- Move toward nearby prey (hunt)
+- Reproduce when prey consumption exceeds threshold
+- Offspring inherit parent's speed + hunt accuracy with small random mutation
+- Die if they don't eat for too long (starvation)
+
+**What you watch:**
+- Population curves: prey count and predator count over time. Classic Lotka-Volterra dynamics — boom and bust cycles, predator-prey oscillations, eventual equilibrium or collapse.
+- Agent traits evolving: early prey are slow, clumsy. Over generations, you see faster prey that detect predators from farther away. Same for predators — better hunters emerge.
+- Spatial patterns: prey flocking behavior emerges naturally. Predators form pack-like hunting patterns.
+
+**The moment:** when a new predator mutation makes them significantly better hunters — prey population crashes, predators spike, then prey adapts, population rebounds. Watching the arms race in real time.
+
+---
+
+## Visual Design
+
+Minimalist geometric. You need to see hundreds of agents at once.
+
+- **Prey:** small green dots
+- **Predators:** slightly larger red dots
+- **Food patches:** soft yellow glow regions
+- **Background:** near-black, subtle grid optional
+
+No textures, no sprites. Pure shape and motion. The graph is as important as the simulation — population curves overlaid, updating in real time.
+
+---
+
+## Interactions
+
+- **Spawn controls:** set initial prey and predator counts
+- **Speed slider:** watch at 1x, 10x, or 100x speed
+- **Reset:** new random population, fresh evolution
+- **Trait inspector:** click any agent to see its stats (speed, perception radius, age, offspring count)
+- **Add disturbance:** drop a predator boom or prey plague to see how the ecosystem responds
+
+---
+
+## Technical Approach
+
+**Stack:** Python + Pygame (2D rendering), or Three.js if we want 3D later.
+
+**Physics:** Simple 2D positions, velocity vectors, perception radius checks.
+
+**Evolution:** Each agent has a trait vector [speed, perception_radius]. On reproduction, offspring traits = parent traits + small Gaussian noise. No genetic algorithms library needed — simple float vectors.
+
+**Simulation loop:**
+1. All predators move toward nearest prey in perception range
+2. All prey move away from nearest predator in perception range (or toward food if no predator nearby)
+3. Food patches grow slowly
+4. Eating → energy gain. Energy threshold → reproduction.
+5. No energy → death.
+6. Render + update population graphs
+
+**Performance:** 500+ agents should run smoothly. Use spatial hashing for O(n) nearest-neighbor queries instead of O(n²).
+
+---
+
+## MVP Scope
+
+**First build:**
+- 2D world, ~200 prey + 20 predators
+- Simple flee/hunt behaviors
+- Food patches, eating, reproduction
+- Trait inheritance with mutation
+- Population graphs (prey count, predator count over time)
+- Speed controls, reset button
+
+**Post-MVP:**
+- Multiple predator species (different hunt strategies)
+- Prey flocking behaviors
+- Environmental changes (food scarcity events, predator plagues)
+- 3D version
+
+---
+
+## Why This Is Interesting
+
+Most ML demos show one agent learning. This shows an **ecosystem** learning. The emergent behaviors — flocking, pack hunting, boom-bust cycles — aren't programmed, they arise. Selection happens and you watch it.
+
+The arms race between prey and predator speed/perception is visible in the trait distributions over time. You can see evolution happening.
+
+---
+
+## Open Questions
+
+- **Grid vs continuous:** Locked to cells or free movement?
+- **Reproduction:** Sexual (two parents) or asexual (one parent)?
+- **Mutation rate:** How fast do traits drift?
 
 ---
 
