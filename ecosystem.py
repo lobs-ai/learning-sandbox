@@ -430,10 +430,10 @@ while running:
             perception = p.perceive(food_in_range, pred_in_range, nearest_pred_dist)
             p.act(perception)
 
-            # Gather food
+            # Gather food (only eat Food objects, not other prey)
             eaten = False
             for food, dist in food_in_range:
-                if dist < p.detection_radius:
+                if isinstance(food, Food) and dist < p.detection_radius:
                     p.energy += REWARD_GATHER
                     p.learn(REWARD_GATHER)
                     food.respawn()
@@ -460,9 +460,9 @@ while running:
         # --- Predator step ---
         new_pred = []
         for pr in pred_list:
-            # Find 3 nearest prey using spatial hash
+            # Find 3 nearest prey using spatial hash (filter to Prey only)
             prey_in_range = spatial.query_radius(pr.x, pr.y, pr.detection_radius)
-            prey_candidates = [item[0] for item in prey_in_range]
+            prey_candidates = [item[0] for item in prey_in_range if isinstance(item[0], Prey)]
             nearest_prey = spatial.nearest(pr.x, pr.y, prey_candidates, max_count=3)
 
             perception = pr.perceive(nearest_prey)
