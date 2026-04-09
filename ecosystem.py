@@ -120,7 +120,10 @@ class MLP:
         self.fc2_b -= lr * grad_b2
 
     def copy(self):
-        other = MLP(0, 0, 0)
+        hidden_dim = self.fc1_w.shape[1]
+        input_dim = self.fc1_w.shape[0]
+        output_dim = self.fc2_w.shape[1]
+        other = MLP(input_dim, hidden_dim, output_dim)
         other.fc1_w = self.fc1_w.copy()
         other.fc1_b = self.fc1_b.copy()
         other.fc2_w = self.fc2_w.copy()
