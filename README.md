@@ -6,14 +6,28 @@ A 3D cube agent learns to navigate obstacle courses using DQN reinforcement lear
 
 ## Run It
 
+**Setup:**
 ```bash
-pip install -r requirements.txt
+./setup.sh
+source .venv/bin/activate
+```
+
+**GUI mode:**
+```bash
 python obstacle_runner.py
 ```
 
-**Headless test** (no window, fast training):
+**Headless (fast training):**
 ```bash
 python obstacle_runner.py --headless
+```
+
+**Or use Make:**
+```bash
+make setup    # install dependencies
+make run      # GUI mode
+make test     # headless 50 episodes
+make train-short  # headless 200 episodes
 ```
 
 ---
@@ -24,8 +38,8 @@ python obstacle_runner.py --headless
 |-----|--------|
 | `R` | Reset current episode |
 | `N` | Next level |
-| `H` | Switch to headless mode |
-| `,` / `.` | Decrease / increase epsilon (exploration) |
+| Arrow Keys | Rotate camera |
+| `W` / `S` | Zoom in/out |
 | `ESC` | Quit |
 
 ---
@@ -40,6 +54,10 @@ python obstacle_runner.py --headless
 3. **Narrow Path** — platforms that narrow to 1.5 units wide
 4. **The Climb** — 5-step staircase
 5. **Moving Target** — platform with a sweeping obstacle
+
+**Rendering**: pyglet (OpenGL-based 3D rendering with custom projection)
+
+**Physics**: Custom built-in (AABB collision, gravity, jump)
 
 **Learning**: DQN neural net (12 inputs → 128 hidden → 6 outputs) trained by TD error. Epsilon-greedy exploration decays over time. Experiences stored in replay buffer and trained in batches.
 
@@ -62,7 +80,6 @@ Win rate climbs over time — the agent is learning.
 ## Requirements
 
 - Python 3.10+
-- pygame
+- pyglet
 - torch
-- ursina
 - numpy
