@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Obstacle Runner — 3D RL Agent
-A cube learns to navigate obstacle courses using DQN reinforcement learning.
 Top-down view, flat levels, green pressure pad goal.
 """
 
@@ -276,23 +275,6 @@ class Agent:
         )
 
 
-class Camera:
-    def __init__(self):
-        self.offset_x = 0.0
-        self.offset_y = 25.0
-        self.offset_z = 0.0
-        self.target_x = 8.0
-        self.target_y = 0.0
-        self.target_z = 0.0
-
-    def project(self, x, y, z, width, height):
-        world_x = x - self.target_x + self.offset_x
-        world_z = z - self.target_z + self.offset_z
-        screen_x = width / 2.0 + world_x * 40.0
-        screen_y = height / 2.0 - (y + self.offset_y) * 40.0
-        return screen_x, screen_y, y
-
-
 def select_action(state, q_net, epsilon):
     if random.random() < epsilon:
         return random.randrange(6)
@@ -380,12 +362,13 @@ def run_gui():
     from pyglet.gl import glClearColor
     from pyglet import graphics, text, clock
 
-    class Renderer(pyglet.window.Window):
+    class GameWindow(pyglet.window.Window):
         def __init__(self, width=1280, height=720):
             super().__init__(width, height, caption="Obstacle Runner", resizable=False)
             self.width = width
             self.height = height
-            self.camera = Camera()
+            self.cam_scale = 25.0
+            self.cam_offset = 0.0
             glClearColor(15 / 255, 15 / 255, 25 / 255, 1.0)
             self.batch = graphics.Batch()
             self.level_label = text.Label(
@@ -413,7 +396,7 @@ def run_gui():
                 color=(200, 200, 200, 255),
             )
             self.help_label = text.Label(
-                "[R] Reset  [N] Next Level  [W/A/S/D] Move Camera  [ESC] Quit",
+                "[R] Reset  [N] Next Level  [ESC] Quit",
                 font_name="Arial",
                 font_size=12,
                 x=20,
@@ -424,97 +407,105 @@ def run_gui():
             self.agent_pos = (0.0, 1.5, 0.0)
             self.goal_pos = (10.0, 0.5, 0.0)
 
+        def world_to_screen(self, wx, wz):
+            sx = self.width / 2.0 + (wx + self.cam_offset) * self.cam_scale
+            sy = self.height / 2.0 - wz * self.scale
+            return sx, sy
+
         def update_labels(self, level_name, episode, wins, epsilon, steps, loss):
             self.level_label.text = f"Level {level_name}"
             self.stats_label.text = f"Episode: {episode} | Wins: {wins} | Eps: {epsilon:.0%} | Steps: {steps}"
             self.loss_label.text = f"Loss: {loss:.4f}"
 
-        def draw_platform(self, cx, cy, cz, w, d, color):
-            corners = [
-                (cx - w / 2, cz - d / 2),
-                (cx + w / 2, cz - d / 2),
-                (cx + w / 2, cz + d / 2),
-                (cx - w / 2, cz + d / 2),
-            ]
-            projected = [
-                self.camera.project(corner[0], cy, corner[1], self.width, self.height)
-                for corner in corners
-            ]
-            pts2d = [(p[0], p[1]) for p in projected]
-            depths = [p[2] for p in projected]
-            avg_depth = sum(depths) / 4.0
-
-            r, g, b = [c / 255.0 for c in color]
-            pos_data = tuple(p for pt in pts2d for p in (pt[0], pt[1], 0.0))
-            color_data = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
-            return avg_depth, pos_data, color_data
-
-        def draw_goal(self, gx, gy, gz, size):
-            half = size / 2.0
-            corners = [
-                (gx - half, gz - half),
-                (gx + half, gz - half),
-                (gx + half, gz + half),
-                (gx - half, gz + half),
-            ]
-            projected = [
-                self.camera.project(corner[0], gy, corner[1], self.width, self.height)
-                for corner in corners
-            ]
-            pts2d = [(p[0], p[1]) for p in projected]
-            avg_depth = sum(p[2] for p in projected) / 4.0
-
-            r, g, b = 0.2, 0.8, 0.3
-            pos_data = tuple(p for pt in pts2d for p in (pt[0], pt[1], 0.0))
-            color_data = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
-            return avg_depth, pos_data, color_data
-
-        def draw_agent(self, ax, ay, az, size):
-            half = size
-            corners = [
-                (ax - half, az - half),
-                (ax + half, az - half),
-                (ax + half, az + half),
-                (ax - half, az + half),
-            ]
-            projected = [
-                self.camera.project(corner[0], ay, corner[1], self.width, self.height)
-                for corner in corners
-            ]
-            pts2d = [(p[0], p[1]) for p in projected]
-            avg_depth = sum(p[2] for p in projected) / 4.0
-
-            r, g, b = 0.9, 0.9, 0.95
-            pos_data = tuple(p for pt in pts2d for p in (pt[0], pt[1], 0.0))
-            color_data = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
-            return avg_depth, pos_data, color_data
-
-        def on_draw(self):
-            self.clear()
-
-            draw_calls = []
-
+        def draw_level(self):
             for bx, by, bz, bw, bd, col in self.platforms_draw:
-                depth, pos, col_data = self.draw_platform(bx, by, bz, bw, bd, col)
-                draw_calls.append((depth, pos, col_data))
-
-            gx, gy, gz = self.goal_pos
-            depth, pos, col_data = self.draw_goal(gx, gy, gz, 1.5)
-            draw_calls.append((depth, pos, col_data))
-
-            ax, ay, az = self.agent_pos
-            depth, pos, col_data = self.draw_agent(ax, ay, az, AGENT_SIZE)
-            draw_calls.append((depth, pos, col_data))
-
-            draw_calls.sort(key=lambda c: c[0], reverse=True)
-            for _, pos_data, color_data in draw_calls:
+                corners = [
+                    self.world_to_screen(bx - bw / 2, bz - bd / 2),
+                    self.world_to_screen(bx + bw / 2, bz - bd / 2),
+                    self.world_to_screen(bx + bw / 2, bz + bd / 2),
+                    self.world_to_screen(bx - bw / 2, bz + bd / 2),
+                ]
+                verts = tuple(p for pt in corners for p in (pt[0], pt[1], 0.0))
+                r, g, b = [c / 255.0 for c in col]
+                colors = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
                 graphics.draw(
                     4,
                     pyglet.gl.GL_TRIANGLE_FAN,
-                    position=("f", pos_data),
-                    colors=("f", color_data),
+                    position=("f", verts),
+                    colors=("f", colors),
                 )
 
+            gx, gy, gz = self.goal_pos
+            half = 0.75
+            corners = [
+                self.world_to_screen(gx - half, gz - half),
+                self.world_to_screen(gx + half, gz - half),
+                self.world_to_screen(gx + half, gz + half),
+                self.world_to_screen(gx - half, gz + half),
+            ]
+            verts = tuple(p for pt in corners for p in (pt[0], pt[1], 0.0))
+            colors = (
+                0.2,
+                0.8,
+                0.3,
+                1.0,
+                0.2,
+                0.8,
+                0.3,
+                1.0,
+                0.2,
+                0.8,
+                0.3,
+                1.0,
+                0.2,
+                0.8,
+                0.3,
+                1.0,
+            )
+            graphics.draw(
+                4,
+                pyglet.gl.GL_TRIANGLE_FAN,
+                position=("f", verts),
+                colors=("f", colors),
+            )
+
+            ax, ay, az = self.agent_pos
+            half = AGENT_SIZE
+            corners = [
+                self.world_to_screen(ax - half, az - half),
+                self.world_to_screen(ax + half, az - half),
+                self.world_to_screen(ax + half, az + half),
+                self.world_to_screen(ax - half, az + half),
+            ]
+            verts = tuple(p for pt in corners for p in (pt[0], pt[1], 0.0))
+            colors = (
+                0.9,
+                0.9,
+                0.95,
+                1.0,
+                0.9,
+                0.9,
+                0.95,
+                1.0,
+                0.9,
+                0.9,
+                0.95,
+                1.0,
+                0.9,
+                0.9,
+                0.95,
+                1.0,
+            )
+            graphics.draw(
+                4,
+                pyglet.gl.GL_TRIANGLE_FAN,
+                position=("f", verts),
+                colors=("f", colors),
+            )
+
+        def on_draw(self):
+            self.clear()
+            self.draw_level()
             self.level_label.draw()
             self.stats_label.draw()
             self.loss_label.draw()
@@ -543,6 +534,7 @@ def run_gui():
             self.episode_reward = 0.0
             self.agent = Agent()
             self._keys_held = set()
+            self._elapsed = 0.0
             self._build_level(0)
             clock.schedule_interval(self.update, 1.0 / 60.0)
 
@@ -550,9 +542,7 @@ def run_gui():
             lvl = LEVELS[idx]
             self.agent.reset(lvl["spawn"])
             lvl_w = lvl["platforms"][-1]["x"] - lvl["platforms"][0]["x"]
-            self.window.camera.target_x = lvl["platforms"][0]["x"] + lvl_w / 2.0
-            self.window.camera.target_z = 0.0
-            self.window.camera.offset_x = 0.0
+            self.window.cam_offset = -(lvl["platforms"][0]["x"] + lvl_w / 2.0)
             self.window.platforms_draw = [
                 (p["x"], p["y"], p["z"], p["w"], p["d"], [55, 55, 75])
                 for p in lvl["platforms"]
@@ -638,19 +628,15 @@ def run_gui():
         def update(self, dt):
             from pyglet.window import key
 
-            speed = 1.0
+            speed = 0.5
             if key.A in self._keys_held:
-                self.window.camera.offset_x -= speed
+                self.window.cam_offset -= speed
             if key.D in self._keys_held:
-                self.window.camera.offset_x += speed
+                self.window.cam_offset += speed
             if key.W in self._keys_held:
-                self.window.camera.offset_y = min(
-                    50.0, self.window.camera.offset_y + speed
-                )
+                self.window.cam_scale = min(50.0, self.window.cam_scale + 0.5)
             if key.S in self._keys_held:
-                self.window.camera.offset_y = max(
-                    5.0, self.window.camera.offset_y - speed
-                )
+                self.window.cam_scale = max(5.0, self.window.cam_scale - 0.5)
             self._do_step(dt)
 
         def on_key_press(self, symbol, modifiers):
@@ -684,7 +670,7 @@ def run_gui():
 
             self._keys_held.discard(symbol)
 
-    window = Renderer(1280, 720)
+    window = GameWindow(1280, 720)
     game = Game(window)
     pyglet.app.run()
 
