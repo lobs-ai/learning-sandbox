@@ -2,7 +2,7 @@
 """
 Obstacle Runner — 3D RL Agent
 A cube learns to navigate obstacle courses using DQN reinforcement learning.
-Custom physics + pyglet rendering. No external physics engine needed.
+Top-down view, flat levels, green pressure pad goal.
 """
 
 import math
@@ -77,68 +77,54 @@ LEVELS = [
     {
         "name": "First Steps",
         "platforms": [
-            {"x": 0, "y": 0, "z": 0, "w": 6, "h": 1, "d": 3},
-            {"x": 8, "y": 0, "z": 0, "w": 4, "h": 1, "d": 3},
+            {"x": 0, "y": 0, "z": 0, "w": 6, "h": 0.5, "d": 4},
+            {"x": 8, "y": 0, "z": 0, "w": 4, "h": 0.5, "d": 4},
         ],
-        "goal": {"x": 10, "y": 1, "z": 0},
-        "spawn": {"x": 0, "y": 2, "z": 0},
+        "goal": {"x": 10, "y": 0.5, "z": 0},
+        "spawn": {"x": 0, "y": 1.5, "z": 0},
     },
     {
-        "name": "The Hop",
+        "name": "Gap Hop",
         "platforms": [
-            {"x": 0, "y": 0, "z": 0, "w": 4, "h": 1, "d": 3},
-            {"x": 5, "y": 1, "z": 0, "w": 3, "h": 1, "d": 3},
-            {"x": 9, "y": 2, "z": 0, "w": 3, "h": 1, "d": 3},
-            {"x": 13, "y": 2, "z": 0, "w": 3, "h": 1, "d": 3},
+            {"x": 0, "y": 0, "z": 0, "w": 3, "h": 0.5, "d": 4},
+            {"x": 5, "y": 0, "z": 0, "w": 2, "h": 0.5, "d": 4},
+            {"x": 9, "y": 0, "z": 0, "w": 2, "h": 0.5, "d": 4},
+            {"x": 13, "y": 0, "z": 0, "w": 3, "h": 0.5, "d": 4},
         ],
-        "goal": {"x": 14.5, "y": 3, "z": 0},
-        "spawn": {"x": 0, "y": 2, "z": 0},
+        "goal": {"x": 14.5, "y": 0.5, "z": 0},
+        "spawn": {"x": 0, "y": 1.5, "z": 0},
     },
     {
-        "name": "Narrow Path",
+        "name": "Staircase",
         "platforms": [
-            {"x": 0, "y": 0, "z": 0, "w": 4, "h": 1, "d": 3},
-            {"x": 6, "y": 0, "z": 0, "w": 1.5, "h": 1, "d": 1.5},
-            {"x": 10, "y": 0, "z": 0, "w": 1.5, "h": 1, "d": 1.5},
-            {"x": 14, "y": 0, "z": 0, "w": 4, "h": 1, "d": 3},
+            {"x": 0, "y": 0, "z": 0, "w": 3, "h": 0.5, "d": 4},
+            {"x": 4, "y": 0, "z": 0, "w": 3, "h": 0.5, "d": 4},
+            {"x": 8, "y": 0, "z": 0, "w": 3, "h": 0.5, "d": 4},
+            {"x": 12, "y": 0, "z": 0, "w": 3, "h": 0.5, "d": 4},
+            {"x": 16, "y": 0, "z": 0, "w": 4, "h": 0.5, "d": 4},
         ],
-        "goal": {"x": 16, "y": 1, "z": 0},
-        "spawn": {"x": 0, "y": 2, "z": 0},
+        "goal": {"x": 18, "y": 0.5, "z": 0},
+        "spawn": {"x": 0, "y": 1.5, "z": 0},
     },
     {
-        "name": "The Climb",
+        "name": "Narrow Walk",
         "platforms": [
-            {"x": 0, "y": 0, "z": 0, "w": 3, "h": 1, "d": 3},
-            {"x": 4, "y": 0.8, "z": 0, "w": 3, "h": 1, "d": 3},
-            {"x": 8, "y": 1.6, "z": 0, "w": 3, "h": 1, "d": 3},
-            {"x": 12, "y": 2.4, "z": 0, "w": 3, "h": 1, "d": 3},
-            {"x": 16, "y": 3.2, "z": 0, "w": 4, "h": 1, "d": 3},
+            {"x": 0, "y": 0, "z": 0, "w": 4, "h": 0.5, "d": 4},
+            {"x": 5, "y": 0, "z": 0, "w": 1.5, "h": 0.5, "d": 1.5},
+            {"x": 9, "y": 0, "z": 0, "w": 1.5, "h": 0.5, "d": 1.5},
+            {"x": 13, "y": 0, "z": 0, "w": 4, "h": 0.5, "d": 4},
         ],
-        "goal": {"x": 18, "y": 4.2, "z": 0},
-        "spawn": {"x": 0, "y": 2, "z": 0},
+        "goal": {"x": 15, "y": 0.5, "z": 0},
+        "spawn": {"x": 0, "y": 1.5, "z": 0},
     },
     {
-        "name": "Moving Target",
+        "name": "Wide Open",
         "platforms": [
-            {"x": 0, "y": 0, "z": 0, "w": 4, "h": 1, "d": 3},
-            {"x": 8, "y": 0, "z": 0, "w": 5, "h": 1, "d": 3},
-            {"x": 15, "y": 0, "z": 0, "w": 4, "h": 1, "d": 3},
+            {"x": 0, "y": 0, "z": 0, "w": 8, "h": 0.5, "d": 6},
+            {"x": 12, "y": 0, "z": 0, "w": 8, "h": 0.5, "d": 6},
         ],
-        "goal": {"x": 17, "y": 1, "z": 0},
-        "spawn": {"x": 0, "y": 2, "z": 0},
-        "obstacles": [
-            {
-                "x": 8,
-                "y": 1.5,
-                "z": 0,
-                "w": 1,
-                "h": 1,
-                "d": 2,
-                "axis": "z",
-                "range": 1.0,
-                "speed": 2.0,
-            },
-        ],
+        "goal": {"x": 16, "y": 0.5, "z": 0},
+        "spawn": {"x": 0, "y": 1.5, "z": 0},
     },
 ]
 
@@ -292,39 +278,19 @@ class Agent:
 
 class Camera:
     def __init__(self):
-        self.yaw = -45.0
-        self.pitch = -25.0
-        self.dist = 20.0
-        self.target = [8.0, 0.0, 0.0]
+        self.offset_x = 0.0
+        self.offset_y = 25.0
+        self.offset_z = 0.0
+        self.target_x = 8.0
+        self.target_y = 0.0
+        self.target_z = 0.0
 
     def project(self, x, y, z, width, height):
-        yaw_rad = math.radians(self.yaw)
-        pitch_rad = math.radians(self.pitch)
-
-        dx = x - self.target[0]
-        dy = y - self.target[1]
-        dz = z - self.target[2]
-
-        rx = dx * math.cos(yaw_rad) - dz * math.sin(yaw_rad)
-        ry = dy * math.cos(pitch_rad)
-        rz = dx * math.sin(yaw_rad) + dz * math.cos(yaw_rad)
-
-        dist = math.sqrt(rx**2 + ry**2 + rz**2) + 1e-6
-        fx = rx / dist
-        fy = ry / dist
-        fz = rz / dist
-
-        fov = 60.0
-        aspect = width / height
-        tan_hfov = math.tan(math.radians(fov) / 2.0)
-
-        ndc_x = fx / (fz * tan_hfov * aspect)
-        ndc_y = fy / (fz * tan_hfov)
-
-        screen_x = (ndc_x + 1.0) * 0.5 * width
-        screen_y = (1.0 - ndc_y) * 0.5 * height
-
-        return screen_x, screen_y, fz
+        world_x = x - self.target_x + self.offset_x
+        world_z = z - self.target_z + self.offset_z
+        screen_x = width / 2.0 + world_x * 40.0
+        screen_y = height / 2.0 - (y + self.offset_y) * 40.0
+        return screen_x, screen_y, y
 
 
 def select_action(state, q_net, epsilon):
@@ -420,8 +386,8 @@ def run_gui():
             self.width = width
             self.height = height
             self.camera = Camera()
-            self.camera.target = [8.0, 0.0, 0.0]
             glClearColor(15 / 255, 15 / 255, 25 / 255, 1.0)
+            self.batch = graphics.Batch()
             self.level_label = text.Label(
                 "",
                 font_name="Arial",
@@ -447,7 +413,7 @@ def run_gui():
                 color=(200, 200, 200, 255),
             )
             self.help_label = text.Label(
-                "[R] Reset  [N] Next Level  [Arrow Keys] Rotate  [W/S] Zoom  [ESC] Quit",
+                "[R] Reset  [N] Next Level  [W/A/S/D] Move Camera  [ESC] Quit",
                 font_name="Arial",
                 font_size=12,
                 x=20,
@@ -455,69 +421,93 @@ def run_gui():
                 color=(150, 150, 150, 255),
             )
             self.platforms_draw = []
-            self.obstacles_draw = []
-            self.agent_pos = (0.0, 2.0, 0.0)
-            self.goal_pos = (10.0, 1.0, 0.0)
-            self.agent_color = (220, 220, 240)
-            self.goal_color = (50, 200, 100)
+            self.agent_pos = (0.0, 1.5, 0.0)
+            self.goal_pos = (10.0, 0.5, 0.0)
 
-        def project_box(self, cx, cy, cz, w, h, d):
-            hw, hh, hd = w / 2.0, h / 2.0, d / 2.0
+        def update_labels(self, level_name, episode, wins, epsilon, steps, loss):
+            self.level_label.text = f"Level {level_name}"
+            self.stats_label.text = f"Episode: {episode} | Wins: {wins} | Eps: {epsilon:.0%} | Steps: {steps}"
+            self.loss_label.text = f"Loss: {loss:.4f}"
+
+        def draw_platform(self, cx, cy, cz, w, d, color):
             corners = [
-                (cx - hw, cy - hh, cz - hd),
-                (cx + hw, cy - hh, cz - hd),
-                (cx + hw, cy + hh, cz - hd),
-                (cx - hw, cy + hh, cz - hd),
-                (cx - hw, cy - hh, cz + hd),
-                (cx + hw, cy - hh, cz + hd),
-                (cx + hw, cy + hh, cz + hd),
-                (cx - hw, cy + hh, cz + hd),
+                (cx - w / 2, cz - d / 2),
+                (cx + w / 2, cz - d / 2),
+                (cx + w / 2, cz + d / 2),
+                (cx - w / 2, cz + d / 2),
             ]
             projected = [
-                self.camera.project(p[0], p[1], p[2], self.width, self.height)
-                for p in corners
+                self.camera.project(corner[0], cy, corner[1], self.width, self.height)
+                for corner in corners
             ]
             pts2d = [(p[0], p[1]) for p in projected]
             depths = [p[2] for p in projected]
-            return pts2d, depths
+            avg_depth = sum(depths) / 4.0
 
-        def draw_box(self, cx, cy, cz, w, h, d, color):
-            pts2d, depths = self.project_box(cx, cy, cz, w, h, d)
-            face_defs = [
-                (0, 1, 2, 3, [c * 0.7 for c in color]),
-                (4, 5, 6, 7, [c * 0.9 for c in color]),
-                (0, 1, 5, 4, [c * 0.6 for c in color]),
-                (2, 3, 7, 6, [c * 0.8 for c in color]),
-                (1, 2, 6, 5, [c * 0.5 for c in color]),
-                (0, 3, 7, 4, [c * 0.85 for c in color]),
+            r, g, b = [c / 255.0 for c in color]
+            pos_data = tuple(p for pt in pts2d for p in (pt[0], pt[1], 0.0))
+            color_data = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
+            return avg_depth, pos_data, color_data
+
+        def draw_goal(self, gx, gy, gz, size):
+            half = size / 2.0
+            corners = [
+                (gx - half, gz - half),
+                (gx + half, gz - half),
+                (gx + half, gz + half),
+                (gx - half, gz + half),
             ]
-            face_defs.sort(key=lambda f: (depths[f[0]] + depths[f[2]]) / 2.0)
-            for i0, i1, i2, i3, col in face_defs:
-                r, g, b = int(col[0]), int(col[1]), int(col[2])
-                cr, cg, cb = r / 255.0, g / 255.0, b / 255.0
-                px0, py0 = pts2d[i0]
-                px1, py1 = pts2d[i1]
-                px2, py2 = pts2d[i2]
-                px3, py3 = pts2d[i3]
-                pos_data = (px0, py0, 0.0, px1, py1, 0.0, px2, py2, 0.0, px3, py3, 0.0)
-                color_data = (
-                    cr,
-                    cg,
-                    cb,
-                    1.0,
-                    cr,
-                    cg,
-                    cb,
-                    1.0,
-                    cr,
-                    cg,
-                    cb,
-                    1.0,
-                    cr,
-                    cg,
-                    cb,
-                    1.0,
-                )
+            projected = [
+                self.camera.project(corner[0], gy, corner[1], self.width, self.height)
+                for corner in corners
+            ]
+            pts2d = [(p[0], p[1]) for p in projected]
+            avg_depth = sum(p[2] for p in projected) / 4.0
+
+            r, g, b = 0.2, 0.8, 0.3
+            pos_data = tuple(p for pt in pts2d for p in (pt[0], pt[1], 0.0))
+            color_data = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
+            return avg_depth, pos_data, color_data
+
+        def draw_agent(self, ax, ay, az, size):
+            half = size
+            corners = [
+                (ax - half, az - half),
+                (ax + half, az - half),
+                (ax + half, az + half),
+                (ax - half, az + half),
+            ]
+            projected = [
+                self.camera.project(corner[0], ay, corner[1], self.width, self.height)
+                for corner in corners
+            ]
+            pts2d = [(p[0], p[1]) for p in projected]
+            avg_depth = sum(p[2] for p in projected) / 4.0
+
+            r, g, b = 0.9, 0.9, 0.95
+            pos_data = tuple(p for pt in pts2d for p in (pt[0], pt[1], 0.0))
+            color_data = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
+            return avg_depth, pos_data, color_data
+
+        def on_draw(self):
+            self.clear()
+
+            draw_calls = []
+
+            for bx, by, bz, bw, bd, col in self.platforms_draw:
+                depth, pos, col_data = self.draw_platform(bx, by, bz, bw, bd, col)
+                draw_calls.append((depth, pos, col_data))
+
+            gx, gy, gz = self.goal_pos
+            depth, pos, col_data = self.draw_goal(gx, gy, gz, 1.5)
+            draw_calls.append((depth, pos, col_data))
+
+            ax, ay, az = self.agent_pos
+            depth, pos, col_data = self.draw_agent(ax, ay, az, AGENT_SIZE)
+            draw_calls.append((depth, pos, col_data))
+
+            draw_calls.sort(key=lambda c: c[0], reverse=True)
+            for _, pos_data, color_data in draw_calls:
                 graphics.draw(
                     4,
                     pyglet.gl.GL_TRIANGLE_FAN,
@@ -525,29 +515,6 @@ def run_gui():
                     colors=("f", color_data),
                 )
 
-        def update_labels(self, level_name, episode, wins, epsilon, steps, loss):
-            self.level_label.text = f"Level {level_name}"
-            self.stats_label.text = f"Episode: {episode} | Wins: {wins} | Eps: {epsilon:.0%} | Steps: {steps}"
-            self.loss_label.text = f"Loss: {loss:.4f}"
-
-        def on_draw(self):
-            self.clear()
-            for bx, by, bz, bw, bh, bd, col in self.platforms_draw:
-                self.draw_box(bx, by, bz, bw, bh, bd, col)
-            for bx, by, bz, bw, bh, bd, col in self.obstacles_draw:
-                self.draw_box(bx, by, bz, bw, bh, bd, col)
-            gx, gy, gz = self.goal_pos
-            self.draw_box(gx, gy, gz, 2.0, 0.3, 2.0, self.goal_color)
-            ax, ay, az = self.agent_pos
-            self.draw_box(
-                ax,
-                ay,
-                az,
-                AGENT_SIZE * 2,
-                AGENT_SIZE * 2,
-                AGENT_SIZE * 2,
-                self.agent_color,
-            )
             self.level_label.draw()
             self.stats_label.draw()
             self.loss_label.draw()
@@ -575,55 +542,21 @@ def run_gui():
             self.last_action = None
             self.episode_reward = 0.0
             self.agent = Agent()
-            self.moving_obstacles = []
             self._keys_held = set()
-            self._elapsed = 0.0
-            self._elapsed = 0.0
             self._build_level(0)
             clock.schedule_interval(self.update, 1.0 / 60.0)
 
         def _build_level(self, idx):
             lvl = LEVELS[idx]
             self.agent.reset(lvl["spawn"])
-            self.window.camera.target = [
-                (lvl["platforms"][0]["x"] + lvl["platforms"][-1]["x"]) / 2.0,
-                0.0,
-                0.0,
-            ]
+            lvl_w = lvl["platforms"][-1]["x"] - lvl["platforms"][0]["x"]
+            self.window.camera.target_x = lvl["platforms"][0]["x"] + lvl_w / 2.0
+            self.window.camera.target_z = 0.0
+            self.window.camera.offset_x = 0.0
             self.window.platforms_draw = [
-                (p["x"], p["y"], p["z"], p["w"], p["h"], p["d"], [40, 40, 55])
+                (p["x"], p["y"], p["z"], p["w"], p["d"], [55, 55, 75])
                 for p in lvl["platforms"]
             ]
-            self.window.obstacles_draw = []
-            self.moving_obstacles = []
-            for obs in lvl.get("obstacles", []):
-                self.moving_obstacles.append(
-                    {
-                        "x": obs["x"],
-                        "y": obs["y"],
-                        "z": obs["z"],
-                        "ox": obs["x"],
-                        "oy": obs["y"],
-                        "oz": obs["z"],
-                        "w": obs["w"],
-                        "h": obs["h"],
-                        "d": obs["d"],
-                        "axis": obs.get("axis", "z"),
-                        "range": obs.get("range", 1.0),
-                        "speed": obs.get("speed", 2.0),
-                    }
-                )
-                self.window.obstacles_draw.append(
-                    (
-                        obs["x"],
-                        obs["y"],
-                        obs["z"],
-                        obs["w"],
-                        obs["h"],
-                        obs["d"],
-                        [200, 80, 60],
-                    )
-                )
             self.window.goal_pos = (
                 lvl["goal"]["x"],
                 lvl["goal"]["y"],
@@ -635,25 +568,6 @@ def run_gui():
 
         def _do_step(self, dt):
             lvl = LEVELS[self.current_level]
-            self._elapsed += dt
-            t = self._elapsed
-            for obs in self.moving_obstacles:
-                offset = math.sin(t * obs["speed"]) * obs["range"]
-                if obs["axis"] == "z":
-                    obs["z"] = obs["oz"] + offset
-                elif obs["axis"] == "x":
-                    obs["x"] = obs["ox"] + offset
-            for i, obs in enumerate(self.moving_obstacles):
-                self.window.obstacles_draw[i] = (
-                    obs["x"],
-                    obs["y"],
-                    obs["z"],
-                    obs["w"],
-                    obs["h"],
-                    obs["d"],
-                    [200, 80, 60],
-                )
-            obstacles_pos = [(o["x"], o["y"], o["z"]) for o in self.moving_obstacles]
             action = 0
             if self.last_state is not None:
                 action = select_action(self.last_state, self.q_net, self.epsilon)
@@ -664,13 +578,13 @@ def run_gui():
                 dt,
                 lvl["platforms"],
                 (lvl["goal"]["x"], lvl["goal"]["y"], lvl["goal"]["z"]),
-                obstacles_pos,
+                [],
             )
             pos = self.agent.get_position()
             self.window.agent_pos = pos
             self.agent.last_x = pos[0]
             self.agent.last_z = pos[2]
-            state = self.agent.perceive(lvl["goal"], obstacles_pos)
+            state = self.agent.perceive(lvl["goal"], [])
             if self.last_state is not None:
                 self.replay.push(
                     self.last_state, self.last_action, reward, state, float(done)
@@ -724,24 +638,24 @@ def run_gui():
         def update(self, dt):
             from pyglet.window import key
 
-            if key.LEFT in self._keys_held:
-                self.window.camera.yaw -= 2.0
-            if key.RIGHT in self._keys_held:
-                self.window.camera.yaw += 2.0
-            if key.UP in self._keys_held:
-                self.window.camera.pitch = max(-89.0, self.window.camera.pitch - 2.0)
-            if key.DOWN in self._keys_held:
-                self.window.camera.pitch = min(-1.0, self.window.camera.pitch + 2.0)
+            speed = 1.0
+            if key.A in self._keys_held:
+                self.window.camera.offset_x -= speed
+            if key.D in self._keys_held:
+                self.window.camera.offset_x += speed
             if key.W in self._keys_held:
-                self.window.camera.dist = max(5.0, self.window.camera.dist - 0.5)
+                self.window.camera.offset_y = min(
+                    50.0, self.window.camera.offset_y + speed
+                )
             if key.S in self._keys_held:
-                self.window.camera.dist = min(40.0, self.window.camera.dist + 0.5)
+                self.window.camera.offset_y = max(
+                    5.0, self.window.camera.offset_y - speed
+                )
             self._do_step(dt)
 
         def on_key_press(self, symbol, modifiers):
             from pyglet.window import key
 
-            self._keys_held = getattr(self, "_keys_held", set())
             self._keys_held.add(symbol)
             if symbol == key.ESCAPE:
                 pyglet.app.exit()
@@ -768,7 +682,6 @@ def run_gui():
         def on_key_release(self, symbol, modifiers):
             from pyglet.window import key
 
-            self._keys_held = getattr(self, "_keys_held", set())
             self._keys_held.discard(symbol)
 
     window = Renderer(1280, 720)
