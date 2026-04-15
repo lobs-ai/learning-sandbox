@@ -357,51 +357,90 @@ def train_headless(episodes=200):
     return wins, episodes
 
 
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def lerp_color(c1, c2, t):
+    return (lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t))
+
+
 def run_gui():
     import pyglet
-    from pyglet.gl import glClearColor
+    from pyglet.gl import (
+        glClearColor,
+        glEnable,
+        GL_BLEND,
+        glBlendFunc,
+        GL_SRC_ALPHA,
+        GL_ONE_MINUS_SRC_ALPHA,
+    )
     from pyglet import graphics, text, clock
+
+    pyglet.options["shadow_window"] = False
 
     class GameWindow(pyglet.window.Window):
         def __init__(self, width=1280, height=720):
             super().__init__(width, height, caption="Obstacle Runner", resizable=False)
             self.width = width
             self.height = height
-            self.cam_scale = 25.0
+            self.cam_scale = 28.0
             self.cam_offset = 0.0
-            glClearColor(15 / 255, 15 / 255, 25 / 255, 1.0)
-            self.batch = graphics.Batch()
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            glClearColor(0.04, 0.06, 0.12, 1.0)
+
+            self._build_ui()
+
+        def _build_ui(self):
+            self.title_label = text.Label(
+                "OBSTACLE RUNNER",
+                font_name="Arial",
+                font_size=13,
+                x=20,
+                y=self.height - 24,
+                color=(120, 220, 180, 200),
+            )
             self.level_label = text.Label(
                 "",
                 font_name="Arial",
-                font_size=18,
+                font_size=16,
                 x=20,
-                y=height - 30,
-                color=(255, 255, 255, 255),
+                y=self.height - 50,
+                color=(255, 255, 255, 230),
             )
             self.stats_label = text.Label(
                 "",
                 font_name="Arial",
-                font_size=14,
+                font_size=13,
                 x=20,
-                y=height - 60,
-                color=(200, 200, 200, 255),
+                y=self.height - 75,
+                color=(180, 180, 200, 180),
             )
             self.loss_label = text.Label(
                 "",
                 font_name="Arial",
-                font_size=14,
+                font_size=12,
                 x=20,
-                y=height - 85,
-                color=(200, 200, 200, 255),
+                y=self.height - 95,
+                color=(150, 150, 170, 160),
             )
-            self.help_label = text.Label(
-                "[R] Reset  [N] Next Level  [ESC] Quit",
+            self.progress_label = text.Label(
+                "",
                 font_name="Arial",
                 font_size=12,
                 x=20,
-                y=20,
-                color=(150, 150, 150, 255),
+                y=self.height - 115,
+                color=(130, 130, 150, 150),
+            )
+            self.help_label = text.Label(
+                "[R] Reset  [N] Next Level  [A/D] Pan  [W/S] Zoom  [ESC] Quit",
+                font_name="Arial",
+                font_size=11,
+                x=self.width - 10,
+                y=15,
+                anchor_x="right",
+                color=(100, 100, 120, 150),
             )
             self.platforms_draw = []
             self.agent_pos = (0.0, 1.5, 0.0)
@@ -409,106 +448,313 @@ def run_gui():
 
         def world_to_screen(self, wx, wz):
             sx = self.width / 2.0 + (wx + self.cam_offset) * self.cam_scale
-            sy = self.height / 2.0 - wz * self.scale
+            sy = self.height / 2.0 - wz * self.cam_scale
             return sx, sy
 
-        def update_labels(self, level_name, episode, wins, epsilon, steps, loss):
+        def update_labels(
+            self, level_name, episode, wins, epsilon, steps, loss, total_eps
+        ):
+            self.title_label.text = "OBSTACLE RUNNER"
             self.level_label.text = f"Level {level_name}"
-            self.stats_label.text = f"Episode: {episode} | Wins: {wins} | Eps: {epsilon:.0%} | Steps: {steps}"
-            self.loss_label.text = f"Loss: {loss:.4f}"
+            self.stats_label.text = (
+                f"Episode {episode}  •  Wins: {wins}  •  Epsilon: {epsilon:.0%}"
+            )
+            self.loss_label.text = f"Loss: {loss:.4f}  •  Steps: {steps}"
+            win_rate = (wins / max(episode, 1)) * 100
+            self.progress_label.text = (
+                f"Win Rate: {win_rate:.0f}% over {episode} episodes"
+            )
+
+        def _draw_rounded_rect(self, cx, cy, w, h, color, radius=6):
+            steps = 8
+            points = []
+            for i in range(4):
+                angle = i * math.pi / 2
+                for j in range(steps + 1):
+                    a = angle + (j / steps) * (math.pi / 2)
+                    px = cx + math.cos(a) * radius
+                    py = cy + math.sin(a) * radius
+                    points.append((px, py))
+            pts_flat = tuple(p for pt in points for p in (pt[0], pt[1], 0.0))
+            n = len(points)
+            colors = color * n
+            colors_f = tuple(c for c in colors for _ in range(4))
+            graphics.draw(
+                n,
+                pyglet.gl.GL_TRIANGLE_FAN,
+                position=("f", pts_flat),
+                colors=("f", colors_f),
+            )
+
+        def _draw_shadow(self, cx, cy, w, h, color, radius=8):
+            shadow_c = (color[0] * 0.15, color[1] * 0.15, color[2] * 0.15, 80)
+            pts = []
+            for i in range(8):
+                a = i * math.pi / 4
+                pts.append(
+                    (
+                        cx + math.cos(a) * (w / 2 + radius),
+                        cy + math.sin(a) * (h / 2 + radius),
+                    )
+                )
+            shadow_corners = [
+                (cx + w / 2, cy + h / 2),
+                (cx - w / 2, cy + h / 2),
+                (cx - w / 2, cy - h / 2),
+                (cx + w / 2, cy - h / 2),
+            ]
+            for c in shadow_corners:
+                pts.append(c)
+            pts_flat = tuple(p for pt in pts for p in (pt[0], pt[1], 0.0))
+            n = len(pts)
+            colors = tuple(shadow_c for _ in range(n))
+            colors_f = tuple(cell for c in colors for cell in c)
+            graphics.draw(
+                n,
+                pyglet.gl.GL_TRIANGLE_FAN,
+                position=("f", pts_flat),
+                colors=("f", colors_f),
+            )
+
+        def _draw_grid(self):
+            grid_color = (40, 50, 70, 40)
+            grid_spacing = 2.0
+            lvl_min_x = min(p["x"] - p["w"] / 2 for p in LEVELS[0]["platforms"]) - 2
+            lvl_max_x = max(p["x"] + p["w"] / 2 for p in LEVELS[0]["platforms"]) + 10
+            for wx in range(int(lvl_min_x), int(lvl_max_x) + 1):
+                if wx % 2 == 0:
+                    x1, y1 = self.world_to_screen(wx, -5)
+                    x2, y2 = self.world_to_screen(wx, 5)
+                    if 0 <= x1 <= self.width and 0 <= x2 <= self.width:
+                        grid_color_f = tuple(c / 255.0 for c in grid_color)
+                        graphics.draw(
+                            2,
+                            pyglet.gl.GL_LINES,
+                            position=("f", (x1, y1, 0, x2, y2, 0)),
+                            colors=("f", (*grid_color_f, *grid_color_f)),
+                        )
 
         def draw_level(self):
+            self._draw_grid()
             for bx, by, bz, bw, bd, col in self.platforms_draw:
-                corners = [
-                    self.world_to_screen(bx - bw / 2, bz - bd / 2),
-                    self.world_to_screen(bx + bw / 2, bz - bd / 2),
-                    self.world_to_screen(bx + bw / 2, bz + bd / 2),
-                    self.world_to_screen(bx - bw / 2, bz + bd / 2),
+                sx, sy = self.world_to_screen(bx, bz)
+                sw = bw * self.cam_scale
+                sh = bd * self.cam_scale
+                base_c = (col[0] / 255, col[1] / 255, col[2] / 255, 255)
+                highlight_c = (
+                    min(1, base_c[0] + 0.15),
+                    min(1, base_c[1] + 0.15),
+                    min(1, base_c[2] + 0.2),
+                    255,
+                )
+                edge_c = (base_c[0] * 0.6, base_c[1] * 0.6, base_c[2] * 0.7, 255)
+                self._draw_shadow(sx, sy + 4, sw, sh, base_c, radius=10)
+                pts = [
+                    (sx - sw / 2, sy - sh / 2),
+                    (sx + sw / 2, sy - sh / 2),
+                    (sx + sw / 2, sy + sh / 2),
+                    (sx - sw / 2, sy + sh / 2),
                 ]
-                verts = tuple(p for pt in corners for p in (pt[0], pt[1], 0.0))
-                r, g, b = [c / 255.0 for c in col]
-                colors = (r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0, r, g, b, 1.0)
+                verts = tuple(p for pt in pts for p in (pt[0], pt[1], 0))
+                edge_c_f = (edge_c[0], edge_c[1], edge_c[2], edge_c[3] / 255.0)
+                pt_v = pts[0], pts[1], pts[2], pts[0], pts[2], pts[3]
+                pt_verts = tuple(p for pt in pt_v for p in (pt[0], pt[1], 0))
                 graphics.draw(
-                    4,
-                    pyglet.gl.GL_TRIANGLE_FAN,
-                    position=("f", verts),
-                    colors=("f", colors),
+                    6,
+                    pyglet.gl.GL_TRIANGLES,
+                    position=("f", pt_verts),
+                    colors=(
+                        "f",
+                        (
+                            *edge_c_f,
+                            *edge_c_f,
+                            *edge_c_f,
+                            *edge_c_f,
+                            *edge_c_f,
+                            *edge_c_f,
+                        ),
+                    ),
+                )
+                inr = 6
+                ipts = [
+                    (sx - sw / 2 + inr, sy - sh / 2 + inr),
+                    (sx + sw / 2 - inr, sy - sh / 2 + inr),
+                    (sx + sw / 2 - inr, sy + sh / 2 - inr),
+                    (sx - sw / 2 + inr, sy + sh / 2 - inr),
+                ]
+                iverts = tuple(p for pt in ipts for p in (pt[0], pt[1], 0))
+                highlight_c_f = (
+                    highlight_c[0],
+                    highlight_c[1],
+                    highlight_c[2],
+                    highlight_c[3] / 255.0,
+                )
+                pt_i = ipts[0], ipts[1], ipts[2], ipts[0], ipts[2], ipts[3]
+                pt_iverts = tuple(p for pt in pt_i for p in (pt[0], pt[1], 0))
+                graphics.draw(
+                    6,
+                    pyglet.gl.GL_TRIANGLES,
+                    position=("f", pt_iverts),
+                    colors=(
+                        "f",
+                        (
+                            *highlight_c_f,
+                            *highlight_c_f,
+                            *highlight_c_f,
+                            *highlight_c_f,
+                            *highlight_c_f,
+                            *highlight_c_f,
+                        ),
+                    ),
                 )
 
             gx, gy, gz = self.goal_pos
-            half = 0.75
-            corners = [
-                self.world_to_screen(gx - half, gz - half),
-                self.world_to_screen(gx + half, gz - half),
-                self.world_to_screen(gx + half, gz + half),
-                self.world_to_screen(gx - half, gz + half),
+            gsx, gsy = self.world_to_screen(gx, gz)
+            gsize = 1.2 * self.cam_scale
+            pulse = 0.85 + 0.15 * math.sin(self._anim_time * 4)
+            goal_c = (0.2 * pulse, 0.9 * pulse, 0.4 * pulse, 200)
+            goal_edge = (0.1 * pulse, 0.7 * pulse, 0.3 * pulse, 255)
+            gpts = [
+                (gsx - gsize, gsy - gsize),
+                (gsx + gsize, gsy - gsize),
+                (gsx + gsize, gsy + gsize),
+                (gsx - gsize, gsy + gsize),
             ]
-            verts = tuple(p for pt in corners for p in (pt[0], pt[1], 0.0))
-            colors = (
-                0.2,
-                0.8,
-                0.3,
-                1.0,
-                0.2,
-                0.8,
-                0.3,
-                1.0,
-                0.2,
-                0.8,
-                0.3,
-                1.0,
-                0.2,
-                0.8,
-                0.3,
-                1.0,
+            gverts = tuple(p for pt in gpts for p in (pt[0], pt[1], 0))
+            goal_edge_f = (
+                goal_edge[0],
+                goal_edge[1],
+                goal_edge[2],
+                goal_edge[3] / 255.0,
             )
+            pt_g = gpts[0], gpts[1], gpts[2], gpts[0], gpts[2], gpts[3]
+            pt_gverts = tuple(p for pt in pt_g for p in (pt[0], pt[1], 0))
             graphics.draw(
-                4,
-                pyglet.gl.GL_TRIANGLE_FAN,
-                position=("f", verts),
-                colors=("f", colors),
+                6,
+                pyglet.gl.GL_TRIANGLES,
+                position=("f", pt_gverts),
+                colors=(
+                    "f",
+                    (
+                        *goal_edge_f,
+                        *goal_edge_f,
+                        *goal_edge_f,
+                        *goal_edge_f,
+                        *goal_edge_f,
+                        *goal_edge_f,
+                    ),
+                ),
             )
+            inr = 5
+            gipts = [
+                (gsx - gsize + inr, gsy - gsize + inr),
+                (gsx + gsize - inr, gsy - gsize + inr),
+                (gsx + gsize - inr, gsy + gsize - inr),
+                (gsx - gsize + inr, gsy + gsize - inr),
+            ]
+            giverts = tuple(p for pt in gipts for p in (pt[0], pt[1], 0))
+            goal_c_f = (goal_c[0], goal_c[1], goal_c[2], goal_c[3] / 255.0)
+            pt_gi = gipts[0], gipts[1], gipts[2], gipts[0], gipts[2], gipts[3]
+            pt_giverts = tuple(p for pt in pt_gi for p in (pt[0], pt[1], 0))
+            graphics.draw(
+                6,
+                pyglet.gl.GL_TRIANGLES,
+                position=("f", pt_giverts),
+                colors=(
+                    "f",
+                    (*goal_c_f, *goal_c_f, *goal_c_f, *goal_c_f, *goal_c_f, *goal_c_f),
+                ),
+            )
+            for i, (lx, ly) in enumerate(
+                [
+                    (gsx - 5, gsy - 5),
+                    (gsx + 5, gsy - 5),
+                    (gsx + 5, gsy + 5),
+                    (gsx - 5, gsy + 5),
+                ]
+            ):
+                glow_c = (goal_c[0], goal_c[1], goal_c[2], 80)
+                glow_c_f = (glow_c[0], glow_c[1], glow_c[2], glow_c[3] / 255.0)
+                graphics.draw(
+                    1,
+                    pyglet.gl.GL_POINTS,
+                    position=("f", (lx, ly, 0)),
+                    colors=("f", glow_c_f),
+                )
 
             ax, ay, az = self.agent_pos
-            half = AGENT_SIZE
-            corners = [
-                self.world_to_screen(ax - half, az - half),
-                self.world_to_screen(ax + half, az - half),
-                self.world_to_screen(ax + half, az + half),
-                self.world_to_screen(ax - half, az + half),
+            asx, asy = self.world_to_screen(ax, az)
+            asize = AGENT_SIZE * self.cam_scale * 0.9
+            agent_c = (0.85, 0.9, 1.0, 255)
+            agent_edge = (0.6, 0.7, 0.9, 255)
+            apts = [
+                (asx - asize, asy - asize),
+                (asx + asize, asy - asize),
+                (asx + asize, asy + asize),
+                (asx - asize, asy + asize),
             ]
-            verts = tuple(p for pt in corners for p in (pt[0], pt[1], 0.0))
-            colors = (
-                0.9,
-                0.9,
-                0.95,
-                1.0,
-                0.9,
-                0.9,
-                0.95,
-                1.0,
-                0.9,
-                0.9,
-                0.95,
-                1.0,
-                0.9,
-                0.9,
-                0.95,
-                1.0,
+            avert = tuple(p for pt in apts for p in (pt[0], pt[1], 0))
+            agent_edge_f = (
+                agent_edge[0],
+                agent_edge[1],
+                agent_edge[2],
+                agent_edge[3] / 255.0,
             )
+            pt_a = apts[0], apts[1], apts[2], apts[0], apts[2], apts[3]
+            pt_avert = tuple(p for pt in pt_a for p in (pt[0], pt[1], 0))
             graphics.draw(
-                4,
-                pyglet.gl.GL_TRIANGLE_FAN,
-                position=("f", verts),
-                colors=("f", colors),
+                6,
+                pyglet.gl.GL_TRIANGLES,
+                position=("f", pt_avert),
+                colors=(
+                    "f",
+                    (
+                        *agent_edge_f,
+                        *agent_edge_f,
+                        *agent_edge_f,
+                        *agent_edge_f,
+                        *agent_edge_f,
+                        *agent_edge_f,
+                    ),
+                ),
+            )
+            inr = 4
+            aipts = [
+                (asx - asize + inr, asy - asize + inr),
+                (asx + asize - inr, asy - asize + inr),
+                (asx + asize - inr, asy + asize - inr),
+                (asx - asize + inr, asy + asize - inr),
+            ]
+            aiverts = tuple(p for pt in aipts for p in (pt[0], pt[1], 0))
+            agent_c_f = (agent_c[0], agent_c[1], agent_c[2], agent_c[3] / 255.0)
+            pt_ai = aipts[0], aipts[1], aipts[2], aipts[0], aipts[2], aipts[3]
+            pt_aiverts = tuple(p for pt in pt_ai for p in (pt[0], pt[1], 0))
+            graphics.draw(
+                6,
+                pyglet.gl.GL_TRIANGLES,
+                position=("f", pt_aiverts),
+                colors=(
+                    "f",
+                    (
+                        *agent_c_f,
+                        *agent_c_f,
+                        *agent_c_f,
+                        *agent_c_f,
+                        *agent_c_f,
+                        *agent_c_f,
+                    ),
+                ),
             )
 
         def on_draw(self):
             self.clear()
+            self._anim_time = pyglet.clock.get_default().time()
             self.draw_level()
+            self.title_label.draw()
             self.level_label.draw()
             self.stats_label.draw()
             self.loss_label.draw()
+            self.progress_label.draw()
             self.help_label.draw()
 
     class Game:
@@ -532,6 +778,7 @@ def run_gui():
             self.last_state = None
             self.last_action = None
             self.episode_reward = 0.0
+            self.total_episodes = 0
             self.agent = Agent()
             self._keys_held = set()
             self._elapsed = 0.0
@@ -543,8 +790,9 @@ def run_gui():
             self.agent.reset(lvl["spawn"])
             lvl_w = lvl["platforms"][-1]["x"] - lvl["platforms"][0]["x"]
             self.window.cam_offset = -(lvl["platforms"][0]["x"] + lvl_w / 2.0)
+            self.window.cam_scale = 28.0
             self.window.platforms_draw = [
-                (p["x"], p["y"], p["z"], p["w"], p["d"], [55, 55, 75])
+                (p["x"], p["y"], p["z"], p["w"], p["d"], [70, 75, 100])
                 for p in lvl["platforms"]
             ]
             self.window.goal_pos = (
@@ -606,6 +854,7 @@ def run_gui():
             if done or self.steps >= MAX_STEPS:
                 self.gen += 1
                 self.episode += 1
+                self.total_episodes += 1
                 if self.episode_reward > 50 or done:
                     self.wins += 1
                 if self.gen % TARGET_UPDATE == 0:
@@ -623,20 +872,22 @@ def run_gui():
                 self.epsilon,
                 self.steps,
                 loss_avg,
+                self.total_episodes,
             )
 
         def update(self, dt):
             from pyglet.window import key
 
-            speed = 0.5
+            speed = 0.3
             if key.A in self._keys_held:
                 self.window.cam_offset -= speed
             if key.D in self._keys_held:
                 self.window.cam_offset += speed
             if key.W in self._keys_held:
-                self.window.cam_scale = min(50.0, self.window.cam_scale + 0.5)
+                self.window.cam_scale = min(60.0, self.window.cam_scale + 0.5)
             if key.S in self._keys_held:
-                self.window.cam_scale = max(5.0, self.window.cam_scale - 0.5)
+                self.window.cam_scale = max(8.0, self.window.cam_scale - 0.5)
+            self._elapsed += dt
             self._do_step(dt)
 
         def on_key_press(self, symbol, modifiers):
